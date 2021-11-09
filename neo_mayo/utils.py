@@ -35,3 +35,16 @@ def var_inmatrix(M,size,nb_frames):
     x = M[mat_lenght:].reshape(nb_frames,size,size)
 
     return [L,x]
+
+
+# %% Create patterns
+
+def circle(shape,r,offset=0.5):
+    """ Create a zeros matrix [w*l] with a circle of ones of raduis r at the centre"""
+    M = np.zeros(shape)
+    w,l = shape
+    for x in range(0, w):
+           for y in range(0, l):
+               if  pow(x-(w/2) + offset ,2) + pow(y-(l/2) + offset,2) < pow(r,2):
+                   M[x,y] = 1
+    return M
