@@ -16,12 +16,16 @@ ______________________________
 import numpy as np
 from neo_mayo.utils import unpack_science_datadir,circle
 
+# For verbose
+sep = ('_' * 50) + "\n"
+from datetime import datetime
+
 # Minimize and its wrappers  
 from scipy.optimize import minimize
 from utils import var_inmatrix,var_inline
 
 #Algos and science model
-from algo import Greed
+from algo import Greed, compute_L_proj
 from model import model_ADI,call_loss_function
 
 
@@ -43,14 +47,10 @@ class mayo_estimator():
 
     """
     
-    def __init__(self,datadir = "./data", mask_size = None, **kwarg):
-        # TODO define parameters that mayo needs to work.
-        self.minimz_param = kwarg
-        self.minimz_param["method"] = "L-BFGS-B"
-        
+    def __init__(self,datadir = "./data", mask_size = None):
         self.create_model_ADI(datadir,mask_size) 
     
-    def estimate(self,delta=1e4,init="zeros"):
+    def estimate(self,delta=1e4,hyper_p=0,**kwarg):
         """ Resovle the minimization problem as discribe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
@@ -63,10 +63,13 @@ class mayo_estimator():
          
          delta : float
              indicating the quadratic vs. linear loss changepoint of huber loss
-         init : str
-             Mode of initialisation of the minimization problem
-             * "Greed" : compute Iterative PCA as init 
-             * "zeros" : init with matrix of zeros
+         
+        hyper_p : float
+             Hyperparameter to give accurate weight to regularization terme for L prior
+         
+        **kargs : dict
+             minimize arguments
+             (see scipy.optimize.minimize)
          
          Returns
          -------
@@ -74,23 +77,41 @@ class mayo_estimator():
              Estimated starlight (L) and circunstlellar (X) contributions
          
         """
+        kwarg["method"] = "L-BFGS-B"
         
-        self.constantes["delta"] = delta
+        self.constantes["delta"]   = delta
+        self.constantes["hyper_p"] = hyper_p
+        # ______________________________________
+        # Step one : Initialisation
+
+        # -- Greed for varaible init  
+        start_time = datetime.now()
+        print(sep + "\nInitialisation with Iterative PCA (Greed) ...")
+       
+        L0,X0 = Greed(self.constantes["science_data"],self.model.rot_angles)
         
-        # Step one : Find a good init with Greed.
-        if init == "Greed" : 
-            L0,X0 = Greed(self.constantes["science_data"],self.model.rot_angles)
-        else : 
-            L0 = X0 = np.zeros(( (self.nb_frames,) + self.shape) )
+        print("Done - running time : " + str(datetime.now() - start_time) + sep)
         
+        # -- Define constantes
+        self.constantes["L_proj"] = compute_L_proj(L0)
+        
+        
+        # ______________________________________
         # Step two : Minimize considering mayo loss model    
+        
+
+        start_time = datetime.now()
+        print(sep + "\nResolving mayo optimization problem ...")
+        
         res = minimize(fun  = call_loss_function,
                        x0   = var_inline(L0,X0),
                        args = (self.model,self.constantes), 
-                       **self.minimz_param)
+                       **kwarg)
         
+        print("Done - Running time : " + str(datetime.now() - start_time) + sep)
         
-        # Store and unwrap results
+        # ______________________________________
+        # Done, Store and unwrap results !
         self.res = res
         L_est, X_est = var_inmatrix(res.x)
         

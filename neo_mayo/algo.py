@@ -28,7 +28,7 @@ def Greed(cube, angle_list,max_comp=2,nb_iter=10):
     for iter_k in range(nb_iter):
         for nb_comp in range(max_comp): 
             
-            res = pca_fullfr.pca(L_k, angle_list,ncomp=nb_comp)
+            res = pca_fullfr.pca(L_k, angle_list,ncomp=nb_comp,verbose=False)
            
             # Since res is derotated we have to rerotate it ...
             for frame_id in range(nb_frame) : 
@@ -41,3 +41,20 @@ def Greed(cube, angle_list,max_comp=2,nb_iter=10):
     L_est = L_k
     
     return L_est,X_est
+
+# %% Other ALGO
+ 
+
+def compute_L_proj(cube,rank=1):
+    """ Compute a L projector """
+    
+    U,S,V = np.linalg.svd(cube)
+    
+    if len(U.shape) == 3 :
+        frame_k = 0
+        proj = U[frame_k] @ np.transpose(U[frame_k])
+
+        for frame_k in range(1,U.shape[0]-1) : 
+            np.stack( (proj, U[frame_k] @ np.transpose(U[frame_k])) )
+    
+    return proj

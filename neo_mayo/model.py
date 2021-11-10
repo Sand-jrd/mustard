@@ -74,7 +74,7 @@ def call_loss_function(var,model,constantes):
     # Unwrap varaible
     L,x = var_inmatrix(var,model.frame_shape[0],model.nb_frame)
     
-    return adi_model_loss(model,L,x,constantes)
+    return adi_model_loss(model,L,x,constantes) + regul_L(L,constantes) + regul_X(x,constantes)
     
                         
 def adi_model_loss(model,L,x,constantes):
@@ -115,3 +115,17 @@ def adi_model_loss(model,L,x,constantes):
     loss = huber(delta,Y - science_data)
     
     return np.sum(loss)
+
+def regul_L(L,constantes):
+    """ Loss function on L prior """
+   
+    proj = constantes["L_proj"]
+    mu   = constantes["hyper_p"]
+    
+    A = proj @ L
+    
+    return mu * np.sum((A - L)**2)
+
+def regul_X(x,constantes):
+    """ Loss function on x prior """
+    return 0

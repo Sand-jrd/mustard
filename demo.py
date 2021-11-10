@@ -19,9 +19,10 @@ datadir = "./example-data"
 # init the estimator
 estimator = mayo_estimator(datadir)
 
-Test_greed = True
-Test_model = True
-Test_mayo  = False
+Test_greed = False
+Test_model = False
+Test_proj  = False
+Test_mayo  = True
 
 # %% Test Greed
 
@@ -70,11 +71,19 @@ if Test_model :
     plt.subplot(2,2,3),plt.imshow(L_est[frame_ID], **args),plt.title("Given L")
     plt.subplot(2,2,4),plt.imshow(X_est[frame_ID], **args),plt.title("Given X")
 
+# %% Test compute L_projections
+from algo import compute_L_proj
+
+if Test_proj :
+    Proj = compute_L_proj(L_est)
+    print("Loss projection : {:.2e}".format( np.sum((L_est - (Proj @ L_est))**2) ) )
+
+
 # %% Test Estimations
 
 if Test_mayo : 
    
-    L_est, X_est = estimator.estimate()
+    L_est, X_est = estimator.estimate(hyper_p=1,options={"maxiter":250})
     
     # ___________________
     # Show results
