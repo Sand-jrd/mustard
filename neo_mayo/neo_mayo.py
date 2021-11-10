@@ -12,13 +12,19 @@ ______________________________
 @author: sand-jrd
 """
 
+import numpy as np
+
+# To manage files
+import glob
+from vip_hci.fits import open_fits
+import json
+
+# Math algo and model 
 from scipy.optimize import minimize
 from utils import var_inmatrix,var_inline,circle
 from algo import Greed
-from model import model_ADI
-from vip_hci.fits import open_fits
-import glob
-import json
+from model import model_ADI,call_loss_function
+
 
 # %%
 
@@ -41,25 +47,38 @@ class mayo_estimator():
     def __init__(self,datadir = "./data", mask_size = None, **kwarg):
         # TODO define parameters that mayo needs to work.
         self.minimz_param = kwarg
-        self.minimz_param["method"] = "BFGS"
+        self.minimz_param["method"] = "L-BFGS-B"
         
         self.create_model_ADI(datadir,mask_size) 
-           
     
-    def estimate(self):
+    def estimate(self,delta=1e4,init="zeros"):
         """ Resovle the minimization problem as discribe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
         """
+        
+        self.constantes["delta"] = delta
+        
         # Step one : Find a good init with Greed.
-        [L0,X0] = Greed()
+        if init == "Greed" : 
+            [L0,X0] = Greed()
+        else : 
+            L0 = X0 = np.zeros(( (self.nb_frames,) + self.shape) )
         
         # Step two : Minimize considering mayo loss model    
-        res = minimize(None,var_inline(L0,X0),**self.minimz_param)
+        res = minimize(fun  = call_loss_function,
+                       x0   = var_inline(L0,X0),
+                       args = (self.model,self.constantes), 
+                       **self.minimz_param)
         
-        [L_est,X_est] = var_inmatrix(res.x)
+        L_est, X_est = var_inmatrix(res.x)
         
-        return [L_est,X_est]
+        return L_est, X_est
+    
+    
+    
+    
+    
     
     # _____________________________________________________________
     # _____________ Tools fonctions of mayo_estimator _____________ 
@@ -88,7 +107,11 @@ class mayo_estimator():
         if mask_size == None : mask_size = psf.shape[0]-10
         mask   = circle(psf.shape,mask_size)
 
+        science_data = open_fits(datadir + "/" + data_info["cube"])
+        self.constantes = {"science_data" : science_data}
+
         #  Init and return model ADI
-        self.shape = psf.shape
-        self.model =  model_ADI(angles,psf,mask)
+        self.shape     = psf.shape
+        self.nb_frames = science_data.shape[0]
+        self.model     =  model_ADI(angles,psf,mask)
     

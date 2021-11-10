@@ -1,3 +1,3 @@
 __version__ = "0.0.1"
 
-from mayo import mayo_estimator
+from neo_mayo.neo_mayo import mayo_estimator
