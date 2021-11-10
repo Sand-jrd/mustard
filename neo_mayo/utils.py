@@ -95,3 +95,34 @@ def circle(shape,r,offset=0.5):
                if  pow(x-(w/2) + offset ,2) + pow(y-(l/2) + offset,2) < pow(r,2):
                    M[x,y] = 1
     return M
+
+# %% Manage files
+
+import glob
+from vip_hci.fits import open_fits
+import json
+
+def unpack_science_datadir(datadir):
+    
+    #  Import data
+    json_file = glob.glob(datadir + "/*.json")
+    
+    if len(json_file) == 0  : raise AssertionError("Json file not found in in data folder : "        + str(datadir))
+    elif len(json_file) > 1 : raise AssertionError("More than two json file found in data folder : " + str(datadir))
+    
+    with open(json_file[0], 'r') as read_data_info:
+        data_info = json.load(read_data_info)        
+    
+    # Checks if all required keys are here 
+    required_keys = ("cube","angles","psf")
+    if not all([key in data_info.keys() for key in required_keys]):
+        raise AssertionError("Data json info does not contained required keys")
+
+    # Open fits
+    angles = open_fits(datadir + "/" + data_info["angles"])
+    psf    = open_fits(datadir + "/" + data_info["psf"])
+    if len(psf.shape) == 3 : psf[data_info["which_psf"]]
+    
+    science_data = open_fits(datadir + "/" + data_info["cube"])
+    
+    return angles,psf,science_data

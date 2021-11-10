@@ -12,16 +12,15 @@ ______________________________
 @author: sand-jrd
 """
 
+
 import numpy as np
+from neo_mayo.utils import unpack_science_datadir,circle
 
-# To manage files
-import glob
-from vip_hci.fits import open_fits
-import json
-
-# Math algo and model 
+# Minimize and its wrappers  
 from scipy.optimize import minimize
-from utils import var_inmatrix,var_inline,circle
+from utils import var_inmatrix,var_inline
+
+#Algos and science model
 from algo import Greed
 from model import model_ADI,call_loss_function
 
@@ -80,7 +79,7 @@ class mayo_estimator():
         
         # Step one : Find a good init with Greed.
         if init == "Greed" : 
-            [L0,X0] = Greed()
+            L0,X0 = Greed(self.constantes["science_data"],self.model.rot_angles)
         else : 
             L0 = X0 = np.zeros(( (self.nb_frames,) + self.shape) )
         
@@ -108,31 +107,13 @@ class mayo_estimator():
     def create_model_ADI(self,datadir,mask_size):
         """ Initialisation of ADI models based on where the given data """
         
-        #  Import data
-        json_file = glob.glob(datadir + "/*.json")
-        
-        if len(json_file) == 0  : raise AssertionError("Json file not found in in data folder : "        + str(datadir))
-        elif len(json_file) > 1 : raise AssertionError("More than two json file found in data folder : " + str(datadir))
-        
-        with open(json_file[0], 'r') as read_data_info:
-            data_info = json.load(read_data_info)        
-        
-        # Checks if all required keys are here 
-        required_keys = ("cube","angles","psf")
-        if not all([key in data_info.keys() for key in required_keys]):
-            raise AssertionError("Data json info does not contained required keys")
-
-        # Open fits
-        angles = open_fits(datadir + "/" + data_info["angles"])
-        psf    = open_fits(datadir + "/" + data_info["psf"])
-        if len(psf.shape) == 3 : psf[data_info["which_psf"]]
+        angles,psf,science_data = unpack_science_datadir(datadir)
         
         # Set up a default pupil mask size based on the frame size
         if mask_size == None : mask_size = psf.shape[0]-10
         mask   = circle(psf.shape,mask_size)
 
         # Store science data as it is a constante
-        science_data = open_fits(datadir + "/" + data_info["cube"])
         self.constantes = {"science_data" : science_data}
 
         #  Init and return model ADI
