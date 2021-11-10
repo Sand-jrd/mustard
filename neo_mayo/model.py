@@ -39,10 +39,13 @@ class model_ADI :
         
     def forward_ADI(self,L,x): 
         """ Process forward model as discribe in mayo : Y = M * ( L + conv(phi,R(x)) )  """
+        
         Y = np.ndarray(L.shape)
+        
         for frame_id in range(L.shape[0]) :
             Rx = frame_rotate(x[frame_id],self.rot_angles[frame_id])
             Y[frame_id] = self.mask * ( L[frame_id] + fftconvolve(self.phi_coro, Rx ,mode='same') )
+        
         return Y
 
 # %% Loss functions and wrappers 
@@ -68,13 +71,38 @@ def call_loss_function(var,model,constantes):
            Value of loss function (see neo_mayo.model.adi_model_loss)
        
     """
+    # Unwrap varaible
     L,x = var_inmatrix(var,model.frame_shape[0],model.nb_frame)
+    
     return adi_model_loss(model,L,x,constantes)
     
                         
 def adi_model_loss(model,L,x,constantes):
     """ ADI loss models as discribe in mayo
-     Loss models if the function we want to minimiz """
+     Loss models of the model 
+     
+     loss = huberLoss( Y - (M * (L + conv(phi,R(x)) ) )
+     
+       Parameters
+       ----------
+       model : neo-mayo.model.model_ADI
+           Forward model (M * (L + conv(phi,R(x)) ) )
+        
+        L,x : ndarray
+            inputs
+            
+        constante : dict
+            dictornay containing the non-varaible of the model :
+            * science-data : science data inputs
+            * delta : indicating the quadratic vs. linear loss changepoint of huber loss
+        
+       
+       Returns
+       -------
+       loss : float
+           Value of loss function (see neo_mayo.model.adi_model_loss)
+       
+    """
     
     # Unpack constantes
     science_data = constantes["science_data"]

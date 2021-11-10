@@ -55,6 +55,25 @@ class mayo_estimator():
         """ Resovle the minimization problem as discribe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
+         
+         Parameters
+         ----------
+         datadir : str
+             path to the directory where are stored science data
+             This directory shound contain a json file discribing its content
+         
+         delta : float
+             indicating the quadratic vs. linear loss changepoint of huber loss
+         init : str
+             Mode of initialisation of the minimization problem
+             * "Greed" : compute Iterative PCA as init 
+             * "zeros" : init with matrix of zeros
+         
+         Returns
+         -------
+         L_est, X_est: ndarray
+             Estimated starlight (L) and circunstlellar (X) contributions
+         
         """
         
         self.constantes["delta"] = delta
@@ -71,6 +90,9 @@ class mayo_estimator():
                        args = (self.model,self.constantes), 
                        **self.minimz_param)
         
+        
+        # Store and unwrap results
+        self.res = res
         L_est, X_est = var_inmatrix(res.x)
         
         return L_est, X_est
@@ -100,13 +122,16 @@ class mayo_estimator():
         if not all([key in data_info.keys() for key in required_keys]):
             raise AssertionError("Data json info does not contained required keys")
 
+        # Open fits
         angles = open_fits(datadir + "/" + data_info["angles"])
         psf    = open_fits(datadir + "/" + data_info["psf"])
         if len(psf.shape) == 3 : psf[data_info["which_psf"]]
         
+        # Set up a default pupil mask size based on the frame size
         if mask_size == None : mask_size = psf.shape[0]-10
         mask   = circle(psf.shape,mask_size)
 
+        # Store science data as it is a constante
         science_data = open_fits(datadir + "/" + data_info["cube"])
         self.constantes = {"science_data" : science_data}
 
