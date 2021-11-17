@@ -29,11 +29,11 @@ def var_inline(L,x):
          inline array of the concatened variables
      
   """
-    if not ( len(L.shape) == 3 and len(x.shape) == 3 and x.shape == L.shape ): 
-        raise ValueError('L and x are supposed to be cubes 3D of same dimentions')
+    if not ( len(L.shape) == 2 and len(x.shape) == 2 and x.shape == L.shape ): 
+        raise ValueError('L and x are supposed to be matrix 2D of same dimentions')
     return np.concatenate((L.flatten(),x.flatten()), axis=None)
 
-def var_inmatrix(M,size,nb_frames):
+def var_inmatrix(M,size):
     """ Unwrap parameters from minimiz (wich is a big vector) into matrixs 
         Matching the order we wrapped it in var inline.
    
@@ -55,14 +55,14 @@ def var_inmatrix(M,size,nb_frames):
         Unwrapped parameters
     
  """
-    if M.size != (2 * size**2 * nb_frames) :
-        raise ValueError('L and x are supposed to be cubes 3D of same dimentions')
-    
-    mat_lenght = size**2 * nb_frames
+    if M.size != (2 * size*size) :
+        raise ValueError("length of vector doesn't match expeted value")
+
+    mat_lenght = size*size
     
     # As we define in var_inline, L should be first then x
-    L = M[:mat_lenght].reshape(nb_frames,size,size)
-    x = M[mat_lenght:].reshape(nb_frames,size,size)
+    L = M[:mat_lenght].reshape(size,size)
+    x = M[mat_lenght:].reshape(size,size)
 
     return L,x
 
@@ -119,10 +119,10 @@ def unpack_science_datadir(datadir):
         raise AssertionError("Data json info does not contained required keys")
 
     # Open fits
-    angles = open_fits(datadir + "/" + data_info["angles"])
-    psf    = open_fits(datadir + "/" + data_info["psf"])
+    angles = open_fits(datadir + "/" + data_info["angles"],verbose=False)
+    psf    = open_fits(datadir + "/" + data_info["psf"],verbose=False)
     if len(psf.shape) == 3 : psf[data_info["which_psf"]]
     
-    science_data = open_fits(datadir + "/" + data_info["cube"])
+    science_data = open_fits(datadir + "/" + data_info["cube"],verbose=False)
     
     return angles,psf,science_data

@@ -10,16 +10,18 @@ Usage axemple of neo-mayo
 
 from neo_mayo import mayo_estimator
 import numpy as np
+from neo_mayo.utils import unpack_science_datadir
 
 # %% Test mayo estimator initialisation
 
 # Choose where to get datas
 datadir = "./example-data"
+angles,psf,science_data = unpack_science_datadir(datadir)
 
 # init the estimator
 estimator = mayo_estimator(datadir)
 
-Test_greed = False
+Test_greed = True
 Test_model = False
 Test_proj  = False
 Test_mayo  = True
@@ -27,12 +29,8 @@ Test_mayo  = True
 # %% Test Greed
 
 if Test_greed :
-
-    from neo_mayo.algo import Greed
-    from neo_mayo.utils import unpack_science_datadir
     
-    angles,psf,science_data = unpack_science_datadir(datadir)
-    L_est,X_est = Greed(science_data, angles,max_comp=2,nb_iter=10)
+    L_est,X_est = estimator.initalisation(from_dir=datadir+"/L0X0")
     
     # ___________________
     # Show results
@@ -40,10 +38,10 @@ if Test_greed :
     import matplotlib.pyplot as plt
     
     plt.figure("Greed Results")
-    for frame_ID in range(2) :
-        args = {"cmap" : "magma", "vmax" : np.percentile(L_est,98)}
-        plt.subplot(2,2,2*frame_ID+1),plt.imshow(L_est[frame_ID], **args),plt.title("L estimation; frame n°"+str(frame_ID))
-        plt.subplot(2,2,2*frame_ID+2),plt.imshow(X_est[frame_ID], **args),plt.title("L estimation; frame n°"+str(frame_ID))
+    args = {"cmap" : "magma", "vmax" : np.percentile(L_est,98)}
+
+    plt.subplot(1,2,1),plt.imshow(L_est, **args),plt.title("L estimation")
+    plt.subplot(1,2,2),plt.imshow(X_est, **args),plt.title("X estimation")
 
 
 # %% Test Forward model
@@ -62,14 +60,14 @@ if Test_model :
     
     plt.figure("Forward model")
     args = {"cmap" : "magma", "vmax" : np.percentile(Y,98)}
-
+    frame_ID = 1
+    
     plt.subplot(2,3,1),plt.imshow(Y[frame_ID], **args),plt.title("Y from forward model")
     plt.subplot(2,3,2),plt.imshow(science_data[frame_ID], **args),plt.title("Real Y from science data")
     plt.subplot(2,3,3),plt.imshow(science_data[frame_ID]-Y[frame_ID], **args),plt.title("Difference")
 
-
-    plt.subplot(2,2,3),plt.imshow(L_est[frame_ID], **args),plt.title("Given L")
-    plt.subplot(2,2,4),plt.imshow(X_est[frame_ID], **args),plt.title("Given X")
+    plt.subplot(2,2,3),plt.imshow(L_est, **args),plt.title("Given L")
+    plt.subplot(2,2,4),plt.imshow(X_est, **args),plt.title("Given X")
 
 # %% Test compute L_projections
 from algo import compute_L_proj
@@ -82,8 +80,8 @@ if Test_proj :
 # %% Test Estimations
 
 if Test_mayo : 
-   
-    L_est, X_est = estimator.estimate(hyper_p=1,options={"maxiter":250})
+    
+    L_est, X_est = estimator.estimate(hyper_p=1,options={"maxiter":1,"iprint":1})
     
     # ___________________
     # Show results

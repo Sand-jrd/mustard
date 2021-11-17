@@ -13,6 +13,7 @@ ______________________________
 
 from vip_hci.preproc import frame_rotate
 from scipy.signal import fftconvolve
+from astropy.convolution import convolve_fft
 import numpy as np
 
 
@@ -27,7 +28,7 @@ class model_ADI :
              x = circumstellar flux
      """
     
-    def __init__(self,rot_angles,phi_coro,mask):
+    def __init__(self,rot_angles,phi_coro,mask,conv="astro",rot_opt=None):
         
         self.rot_angles = rot_angles # Frames known rotations list
         self.phi_coro   = phi_coro   # Reponse of the coronograph
@@ -35,22 +36,39 @@ class model_ADI :
         
         self.nb_frame    = len(rot_angles)
         self.frame_shape = phi_coro.shape
+        
+        #-- Options 
+        
+        if rot_opt == "fastest":
+            self.rot_args = {"imlib":'opencv',"interpolation":'lanczos4'}
+        if rot_opt == None:
+            self.rot_args = {}
+        
+        if conv == "astro" : 
+            self.conv     = convolve_fft
+            self.conv_arg = {"normalize_kernel":False,"nan_treatment":'fill'}
+        if conv == "scipy" : 
+            self.conv     = fftconvolve
+            self.conv_arg = {"mode":"same"}
+            
+
 
         
     def forward_ADI(self,L,x): 
         """ Process forward model as discribe in mayo : Y = M * ( L + conv(phi,R(x)) )  """
         
-        Y = np.ndarray(L.shape)
+        Y = np.ndarray((self.nb_frame,) + L.shape)
         
-        for frame_id in range(L.shape[0]) :
-            Rx = frame_rotate(x[frame_id],self.rot_angles[frame_id])
-            Y[frame_id] = self.mask * ( L[frame_id] + fftconvolve(self.phi_coro, Rx ,mode='same') )
+        for frame_id in range(self.nb_frame) :
+            Rx = frame_rotate(x,self.rot_angles[frame_id],**self.rot_args)
+            Y[frame_id] = self.mask * ( L + self.conv(self.phi_coro, Rx,**self.conv_arg) )
         
         return Y
 
+
 # %% Loss functions and wrappers 
 
-from neo_mayo.utils import var_inmatrix
+from neo_mayo.utils import var_inmatrix,var_inline
 from scipy.special import huber
 
 def call_loss_function(var,model,constantes):
@@ -72,7 +90,7 @@ def call_loss_function(var,model,constantes):
        
     """
     # Unwrap varaible
-    L,x = var_inmatrix(var,model.frame_shape[0],model.nb_frame)
+    L,x = var_inmatrix(var,model.frame_shape[0])
     
     return adi_model_loss(model,L,x,constantes) + regul_L(L,constantes) + regul_X(x,constantes)
     
@@ -115,6 +133,61 @@ def adi_model_loss(model,L,x,constantes):
     loss = huber(delta,Y - science_data)
     
     return np.sum(loss)
+
+# %% Loss fonction ggradient
+
+def call_loss_grad(var,model,constantes):
+    """
+       Unwrap minimiz parameters and call adi model loss
+       
+       Parameters
+       ----------
+       var : array
+           inline varaibles (matching the minimiz syntaxs)
+       
+       model : neo-mayo.model.model_ADI
+           Forward model
+       
+       Returns
+       -------
+       loss : float
+           Value of loss function (see neo_mayo.model.adi_model_loss)
+       
+    """
+    # Unwrap varaible
+    L,x = var_inmatrix(var,model.frame_shape[0])
+    
+    return var_inline(loss_grad(model,L,x,constantes))
+    
+
+def loss_grad(model,L,x,constantes): 
+    """ Process backward model xich is a simple order 1 différential
+    approximation gradient
+    
+    """
+    # Store gradient 
+    gradL = np.zeros(L.shape)
+    gradX = np.zeros(x.shape)
+    
+    # delta to derive
+    dL = np.zeros(L.shape)
+    dX = np.zeros(x.shape)
+    
+    # We try each strings d_x, d_y to compute gradients
+    for d_x in range(L.shape[0]) :
+        for d_y in range(L.shape[0]) :
+            
+            # Grad de L
+            dL[d_x,d_y] = 1
+            gradL += adi_model_loss(model,dL,dX,constantes)
+            dL[d_x,d_y] = 0
+            
+            # Grad de X
+            dX[d_x,d_y] = 1
+            gradX += adi_model_loss(model,dL,dX,constantes)
+            dX[d_x,d_y] = 0
+    
+    return gradL,gradX
 
 def regul_L(L,constantes):
     """ Loss function on L prior """
