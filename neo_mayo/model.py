@@ -15,7 +15,8 @@ from vip_hci.preproc import frame_rotate
 from scipy.signal import fftconvolve
 from astropy.convolution import convolve_fft
 import numpy as np
-
+import torch
+from torchvision.transforms.functional import rotate
 
 # %% Forward ADI model : 
 
@@ -33,6 +34,7 @@ class model_ADI :
         self.rot_angles = rot_angles # Frames known rotations list
         self.phi_coro   = phi_coro   # Reponse of the coronograph
         self.mask       = mask       # Pupil mask
+        self.torch      = False
         
         self.nb_frame    = len(rot_angles)
         self.frame_shape = phi_coro.shape
@@ -43,6 +45,7 @@ class model_ADI :
             self.rot_args = {"imlib":'opencv',"interpolation":'lanczos4'}
         if rot_opt == None:
             self.rot_args = {}
+            
         
         if conv == "astro" : 
             self.conv     = convolve_fft
@@ -50,8 +53,12 @@ class model_ADI :
         if conv == "scipy" : 
             self.conv     = fftconvolve
             self.conv_arg = {"mode":"same"}
-            
 
+    def adapt_torch(self,delta):
+        self.torch      = True
+        self.phi_coro   = torch.from_numpy(self.phi_coro)  # Reponse of the coronograph
+        self.mask       = torch.from_numpy(self.mask)      # Pupil mask
+        self.hub_loss   = torch.nn.HuberLoss('sum',delta)
 
         
     def forward_ADI(self,L,x): 
@@ -64,7 +71,41 @@ class model_ADI :
             Y[frame_id] = self.mask * ( L + self.conv(self.phi_coro, Rx,**self.conv_arg) )
         
         return Y
+    
+    def forward_torch_ADI(self,L,x): 
+        """ Process forward model as discribe in mayo : Y = M * ( L + conv(phi,R(x)) )  """
+        
+        Y = torch.zeros((self.nb_frame,) + L.shape)
+        
+        for frame_id in range(self.nb_frame) :
+            Rx = rotate(x,float(self.rot_angles[frame_id]))
+            conv_Rx = torch.ifft( torch.fft(self.phi_coro) * torch.fft(Rx) ) 
+            Y[frame_id] = self.mask * ( L + conv_Rx )
+        
+        return Y
 
+
+# %% Constrain definitions 
+
+def create_constrain_list(model,constantes):
+    """ Create the list of model constraints """
+    
+    cons = []
+    
+    # Constrains on L (starlight)
+    cons.append( {'type':'eq','fun':proj_L,'args':(model,constantes)} )
+    
+    return cons
+    
+def proj_L(var,model,constantes):  
+    """ L contrain : Projection of L have to be equal to L"""
+    
+    L,x = var_inmatrix(var,model.frame_shape[0])
+
+    proj = constantes["L_proj"]
+    
+    return np.sum((proj @ L) - L)
+    
 
 # %% Loss functions and wrappers 
 
@@ -92,7 +133,11 @@ def call_loss_function(var,model,constantes):
     # Unwrap varaible
     L,x = var_inmatrix(var,model.frame_shape[0])
     
-    return adi_model_loss(model,L,x,constantes) + regul_L(L,constantes) + regul_X(x,constantes)
+    loss = adi_model_loss(model,L,x,constantes) 
+    
+    if constantes["regul"] : loss += regul_L(L,constantes) + regul_X(x,constantes)
+    
+    return loss
     
                         
 def adi_model_loss(model,L,x,constantes):
@@ -125,7 +170,7 @@ def adi_model_loss(model,L,x,constantes):
     # Unpack constantes
     science_data = constantes["science_data"]
     delta        = constantes["delta"]
-
+    
     #  Compute forward model
     Y = model.forward_ADI(L,x)
     
@@ -133,6 +178,20 @@ def adi_model_loss(model,L,x,constantes):
     loss = huber(delta,Y - science_data)
     
     return np.sum(loss)
+
+def adi_model_loss_torch(model,L,x,constantes):
+    """  same as normal but tensor freidnly  """
+    
+    # Unpack constantes
+    science_data = constantes["science_data"]
+    
+    #  Compute forward model
+    Y = model.forward_torch_ADI(L,x)
+    
+    #Compute model loss with huber distance
+    loss = model.hub_loss(Y,science_data)
+    
+    return loss
 
 # %% Loss fonction ggradient
 
@@ -188,6 +247,7 @@ def loss_grad(model,L,x,constantes):
             dX[d_x,d_y] = 0
     
     return gradL,gradX
+
 
 def regul_L(L,constantes):
     """ Loss function on L prior """

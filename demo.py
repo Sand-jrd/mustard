@@ -81,7 +81,8 @@ if Test_proj :
 
 if Test_mayo : 
     
-    L_est, X_est = estimator.estimate(hyper_p=1,options={"maxiter":1,"iprint":1})
+    #  Possible minimizer : {"torch","SLSQP","L-BFGS-B","minimize_parallel"}
+    L_est, X_est = estimator.estimate(hyper_p=1,options={"maxiter":1,"iprint":1},minimizer="torch")
     
     # ___________________
     # Show results

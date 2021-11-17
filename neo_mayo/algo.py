@@ -62,6 +62,7 @@ def torch_minimiz(fun,x0,args,nb_iter=10,**kwarg) :
   
     model       = args[0]
     constantes  = args[1]  
+    model.adapt_torch(constantes["delta"])
     L0,X0 = var_inmatrix(x0,model.frame_shape[0])
     
     L0 = torch.from_numpy(L0)

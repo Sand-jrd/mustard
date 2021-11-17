@@ -13,6 +13,7 @@ ______________________________
 """
 
 
+
 # For file managment
 from neo_mayo.utils import unpack_science_datadir
 from vip_hci.fits import open_fits,write_fits
@@ -20,8 +21,10 @@ from os import mkdir
 from os.path import isdir 
 
 # For verbose
-sep = ('_' * 50) + "\n"
 from datetime import datetime
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+sep = ('_' * 50) + "\n"
 
 # Minimizers and its wrappers  
 from scipy.optimize import minimize as scipy_minimiz
@@ -30,7 +33,7 @@ from utils import var_inmatrix,var_inline
 
 #Algos and science model
 from algo import init_estimate, compute_L_proj, torch_minimiz
-from model import model_ADI,call_loss_function, adi_model_loss, call_loss_grad
+from model import model_ADI,call_loss_function, adi_model_loss_torch, call_loss_grad, create_constrain_list
 
 # Other
 from neo_mayo.utils import circle
@@ -54,7 +57,7 @@ class mayo_estimator():
 
     """
     
-    def __init__(self,datadir = "./data", mask_size = None):
+    def __init__(self,datadir="./data",mask_size=None):
         self.create_model_ADI(datadir,mask_size) 
         self.L0x0 = None
     
@@ -107,7 +110,7 @@ class mayo_estimator():
         return L0, X0
         
     
-    def estimate(self,delta=1e4,hyper_p=0,minimizer="scipy",**kwarg):
+    def estimate(self,delta=1e4,hyper_p=0,minimizer="minimize_parallel",**kwarg):
         """ Resovle the minimization problem as discribe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
@@ -138,23 +141,36 @@ class mayo_estimator():
         if self.L0x0 is None : raise AssertionError("No L0/x0. You need to run initialisation")
         
         
-        fun = call_loss_function
-        jac = call_loss_grad
+
         
         # -- Define constantes 
         self.constantes["delta"]   = delta
         self.constantes["hyper_p"] = hyper_p
         
+        # -- Default mode; can be changed in 'Options' below
+        self.constantes["regul"]   = True
+        fun = call_loss_function
+        jac = call_loss_grad
+        
+        # ______________________________________
         # -- Options
+        
         if minimizer == "minimize_parallel" : minimiz = parallel_minimiz
+        
         if minimizer == "torch" : 
             minimiz = torch_minimiz
-            fun = adi_model_loss
+            fun = adi_model_loss_torch
             jac = None
-        else :
+            
+        if minimizer == "L-BFGS-B" :
             minimiz = scipy_minimiz
-            if not "method" in kwarg.keys() : kwarg["method"] = "L-BFGS-B"
-        
+            kwarg["method"] = "L-BFGS-B"
+            
+        if minimizer == "SLSQP" :
+                minimiz = scipy_minimiz
+                kwarg["method"] = "SLSQP"
+                self.constantes["regul"]   = False
+                kwarg["constraints"] = create_constrain_list(self.model,self.constantes)
         
 
         
@@ -181,10 +197,8 @@ class mayo_estimator():
         return L_est, X_est
     
     
-    
-    
-    
-    
+
+
     # _____________________________________________________________
     # _____________ Tools fonctions of mayo_estimator _____________ 
 
