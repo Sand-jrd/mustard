@@ -1,4 +1,9 @@
 .DS_Store
+.idea
+
+# PyCharm default ignored files
+/shelf/
+/workspace.xml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

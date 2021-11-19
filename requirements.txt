@@ -1,1 +1,1 @@
-optimparallel=0.1.2
+git+git://github.com/VChristiaens/VIP@itpca_dvpt/optimparallel=0.1.2torchtorchvision
