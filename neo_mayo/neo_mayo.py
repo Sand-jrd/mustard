@@ -24,16 +24,16 @@ from os.path import isdir
 from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
-sep = ('_' * 50) + "\n"
+sep = "\n" + ('_' * 50)
 
 # Minimizers and its wrappers  
 from scipy.optimize import minimize as scipy_minimiz
 from optimparallel import minimize_parallel as parallel_minimiz
-from utils import var_inmatrix,var_inline
+from neo_mayo.utils import var_inmatrix,var_inline
 
 #Algos and science model
-from algo import init_estimate, compute_L_proj, torch_minimiz
-from model import model_ADI,call_loss_function, adi_model_loss_torch, call_loss_grad, create_constrain_list
+from neo_mayo.algo import init_estimate, compute_L_proj, torch_minimiz
+from neo_mayo.model import model_ADI,call_loss_function, adi_model_loss_torch, call_loss_grad, create_constrain_list
 
 # Other
 from neo_mayo.utils import circle
@@ -61,7 +61,7 @@ class mayo_estimator():
         self.create_model_ADI(datadir,mask_size) 
         self.L0x0 = None
     
-    def initalisation(self,from_dir=None,save=None):
+    def initalisation(self,from_dir=None,save=None,**kwargs):
         """ The first step with greed aim to find a good initialisation 
          
          Parameters
@@ -72,6 +72,10 @@ class mayo_estimator():
          save : str
              if a path is given, save L0 and X0 on the directory
              if None, do not save
+         kwagrs : keys arguments
+             will be pass to iterative pca function
+             (see pca_it arguments)
+
          
          Returns
          -------
@@ -92,13 +96,13 @@ class mayo_estimator():
             start_time = datetime.now()
             print(sep + "\nInitialisation with Iterative PCA (Greed) ...")
            
-            L0,X0 = init_estimate(self.constantes["science_data"],self.model.rot_angles)
+            L0 ,X0 = init_estimate(self.constantes["science_data"],self.model.rot_angles,**kwargs)
             
             print("Done - running time : " + str(datetime.now() - start_time) + sep)
            
             if save : 
                 if not isdir(save) : mkdir(save)
-                print("Get init from pre-processed datas...")
+                print("Save init from in "+save+"...")
                 write_fits(save + "/L0.fits", L0, verbose=False)
                 write_fits(save + "/X0.fits", X0, verbose=False)
                 
@@ -192,7 +196,7 @@ class mayo_estimator():
         # ______________________________________
         # Done, Store and unwrap results !
         self.res = res
-        L_est, X_est = var_inmatrix(res.x)
+        L_est, X_est = var_inmatrix(res['x'],self.model.frame_shape[0])
         
         return L_est, X_est
     
@@ -208,14 +212,16 @@ class mayo_estimator():
         angles,psf,science_data = unpack_science_datadir(datadir)
         
         # Set up a default pupil mask size based on the frame size
-        if mask_size == None : mask_size = psf.shape[0]-10
+        if mask_size == None : mask_size = psf.shape[0]//2-2
         mask   = circle(psf.shape,mask_size)
 
         # Store science data as it is a constante
-        self.constantes = {"science_data" : science_data}
+        self.constantes = {"science_data" : mask * science_data}
 
         #  Init and return model ADI
         self.shape     = psf.shape
         self.nb_frames = science_data.shape[0]
         self.model     = model_ADI(angles,psf,mask)
-    
+
+    def get_science_data(self):
+        return self.model.rot_angles,self.model.phi_coro,self.constantes["science_data"]

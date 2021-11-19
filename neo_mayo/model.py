@@ -13,10 +13,14 @@ ______________________________
 
 from vip_hci.preproc import frame_rotate
 from scipy.signal import fftconvolve
+from scipy.ndimage import rotate as sci_rotate
 from astropy.convolution import convolve_fft
 import numpy as np
 import torch
-from torchvision.transforms.functional import rotate
+from torchvision.transforms.functional import rotate, InterpolationMode
+
+import warnings
+warnings.simplefilter("ignore", UserWarning)
 
 # %% Forward ADI model : 
 
@@ -29,7 +33,7 @@ class model_ADI :
              x = circumstellar flux
      """
     
-    def __init__(self,rot_angles,phi_coro,mask,conv="astro",rot_opt=None):
+    def __init__(self,rot_angles,phi_coro,mask,conv="fft",rot_opt="no-vip"):
         
         self.rot_angles = rot_angles # Frames known rotations list
         self.phi_coro   = phi_coro   # Reponse of the coronograph
@@ -42,9 +46,14 @@ class model_ADI :
         #-- Options 
         
         if rot_opt == "fastest":
-            self.rot_args = {"imlib":'opencv',"interpolation":'lanczos4'}
-        if rot_opt == None:
+            self.rotate = frame_rotate
+            self.rot_args = {"imlib":'opencv',"interpolation":'nearneig'}
+        if rot_opt == "best":
+            self.rotate = frame_rotate
             self.rot_args = {}
+        if rot_opt == "no-vip":
+            self.rotate = sci_rotate
+            self.rot_args = {"reshape":False}
             
         
         if conv == "astro" : 
@@ -53,12 +62,25 @@ class model_ADI :
         if conv == "scipy" : 
             self.conv     = fftconvolve
             self.conv_arg = {"mode":"same"}
+        if conv == "fft":
+            self.conv    = lambda x,y,**kwargs: abs(np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(np.fft.fft2(x)) * np.fft.fftshift(np.fft.fft2(y)))))
+            self.conv_arg = {}
 
-    def adapt_torch(self,delta):
-        self.torch      = True
-        self.phi_coro   = torch.from_numpy(self.phi_coro)  # Reponse of the coronograph
-        self.mask       = torch.from_numpy(self.mask)      # Pupil mask
-        self.hub_loss   = torch.nn.HuberLoss('sum',delta)
+
+    def adapt_torch(self,delta=1):
+
+        # -- Convert to tensor + unsqueeze adding dummy dimention
+        # to fit tensor rotate requirement
+        if self.torch == False :
+
+            self.phi_coro   = torch.unsqueeze(torch.from_numpy(self.phi_coro), 0).float()
+            self.mask       = torch.unsqueeze(torch.from_numpy(self.mask), 0).float()
+
+            self.hub_loss   = torch.nn.HuberLoss('sum',float(delta))
+            self.conv    = lambda x,y,**kwargs: abs(torch.fft.ifftshift(torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) * torch.fft.fftshift(torch.fft.fft2(y)))))
+
+
+        self.torch = True
 
         
     def forward_ADI(self,L,x): 
@@ -67,9 +89,9 @@ class model_ADI :
         Y = np.ndarray((self.nb_frame,) + L.shape)
         
         for frame_id in range(self.nb_frame) :
-            Rx = frame_rotate(x,self.rot_angles[frame_id],**self.rot_args)
+            Rx = self.rotate(x,self.rot_angles[frame_id],**self.rot_args)
             Y[frame_id] = self.mask * ( L + self.conv(self.phi_coro, Rx,**self.conv_arg) )
-        
+
         return Y
     
     def forward_torch_ADI(self,L,x): 
@@ -78,9 +100,9 @@ class model_ADI :
         Y = torch.zeros((self.nb_frame,) + L.shape)
         
         for frame_id in range(self.nb_frame) :
-            Rx = rotate(x,float(self.rot_angles[frame_id]))
-            conv_Rx = torch.ifft( torch.fft(self.phi_coro) * torch.fft(Rx) ) 
-            Y[frame_id] = self.mask * ( L + conv_Rx )
+            Rx = rotate(x,float(self.rot_angles[frame_id]),interpolation = InterpolationMode.BILINEAR)
+            conv_Rx = self.conv(self.phi_coro,Rx)
+            Y[frame_id] = self.mask * ( L + conv_Rx.abs() )
         
         return Y
 
@@ -133,7 +155,7 @@ def call_loss_function(var,model,constantes):
     # Unwrap varaible
     L,x = var_inmatrix(var,model.frame_shape[0])
     
-    loss = adi_model_loss(model,L,x,constantes) 
+    loss = adi_model_loss(model,L,x,constantes)
     
     if constantes["regul"] : loss += regul_L(L,constantes) + regul_X(x,constantes)
     
@@ -190,8 +212,9 @@ def adi_model_loss_torch(model,L,x,constantes):
     
     #Compute model loss with huber distance
     loss = model.hub_loss(Y,science_data)
-    
-    return loss
+    R = regul_L_torch(L,constantes)
+
+    return loss + R
 
 # %% Loss fonction ggradient
 
@@ -258,6 +281,17 @@ def regul_L(L,constantes):
     A = proj @ L
     
     return mu * np.sum((A - L)**2)
+
+
+def regul_L_torch(L, constantes):
+    """ Loss function on L prior """
+
+    proj = constantes["L_proj"]
+    mu = constantes["hyper_p"]
+
+    A = proj @ L
+
+    return float(mu) * torch.sum((A[0] - L[0]) ** 2)
 
 def regul_X(x,constantes):
     """ Loss function on x prior """
