@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from torchvision.transforms.functional import rotate, InterpolationMode
 from torch.nn.functional import relu
-from neo_mayo.utils import sobel_tensor_conv, var_inmatrix, var_inline
+from neo_mayo.utils import sobel_tensor_conv, var_inmatrix, var_inline, tensor_rotate_fft
 from scipy.special import huber
 
 import warnings
@@ -102,8 +102,9 @@ class model_ADI:
         Y = torch.zeros((self.nb_frame,) + L.shape)
 
         for frame_id in range(self.nb_frame):
-            Rx = torch.abs(rotate(x, float(self.rot_angles[frame_id]), interpolation=InterpolationMode.BILINEAR))
+            # Rx = torch.abs(rotate(x, float(self.rot_angles[frame_id]), interpolation=InterpolationMode.BILINEAR))
             # conv_Rx = self.conv(self.phi_coro,x)
+            Rx = torch.abs(tensor_rotate_fft(x, float(self.rot_angles[frame_id])))
             Y[frame_id] = self.mask * (torch.abs(L) + Rx.abs())
 
         return Y

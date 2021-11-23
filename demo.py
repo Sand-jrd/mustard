@@ -19,14 +19,14 @@ import torch
 datadir = "./example-data"
 
 Test_greed = False
-Test_model = False
+Test_model = True
 Test_proj = False
-Test_mayo = True
+Test_mayo = False
 
 minimizer = "torch"  # Possible minimizer : {"torch", "SLSQP", "L-BFGS-B", "minimize_parallel"}
 regul_weight = 0
 delta = 1e4
-estim_iter = 20
+estim_iter = 7
 
 # %% -------------------------------------
 
@@ -74,7 +74,7 @@ def test_model(L_ini, X_ini):
 
 if Test_model:
 
-    Y = test_model(L_ini, X_ini)
+    Y, _, _ = test_model(L_ini, X_ini)
 
     # ___________________
     # Show results

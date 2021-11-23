@@ -103,6 +103,7 @@ def torch_minimiz(fun, x0, args, nb_iter=10, gif=True, **kwarg):
     optimizer = optim.LBFGS([L0, X0])
 
     Y = model.forward_torch_ADI(L0, X0)
+    global loss
     loss = model.hub_loss(Y, science_data)
 
     def closure():
@@ -112,7 +113,7 @@ def torch_minimiz(fun, x0, args, nb_iter=10, gif=True, **kwarg):
         R = R_weight * regul_X(X0)
         loss = model.hub_loss(Y, science_data) + R
         loss.backward()
-        print("Iteration n°" + str(ii) + " {:.2e}".format(model.hub_loss(Y, science_data) + R))
+        print("Iteration n°" + str(ii) + " {:.6e}".format(model.hub_loss(Y, science_data) + R))
         return loss
 
     for ii in range(nb_iter):

@@ -19,6 +19,7 @@ import numpy as np
 # Syntax wrapper for simplify minimize  usage.
 import torch
 from torch.nn.functional import conv2d
+import torch.fft as tf
 
 # File management
 from vip_hci.fits import open_fits
@@ -180,6 +181,97 @@ def sobel_tensor_conv(tensor):
 save_gif = "./"
 
 
+def tensor_rotate_fft(tensor_in:torch.Tensor, angle:float) -> torch.Tensor:
+    """ Rotates Tensor using Fourier transform phases:
+        Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
+        See details in Larkin et al. (1997) and Hagelberg et al. (2016).
+        Note: this is significantly slower than interpolation methods
+        (e.g. opencv/lanczos4 or ndimage), but preserves the flux better
+        (by construction it preserves the total power). It is more prone to
+        large-scale Gibbs artefacts, so make sure no sharp edge is present in
+        the image to be rotated.
+
+        /!\ This is a blindly coded adaptation for Tensor of the vip function rotate_fft
+        (https://github.com/vortex-exoplanet/VIP/blob/51e1d734dcdbee1fbd0175aa3d0ab62eec83d5fa/vip_hci/preproc/derotation.py#L507)
+
+        /!\ This suppose the frame is perfectly centred
+
+        ! Warning: if input frame has even dimensions, the center of rotation
+        will NOT be between the 4 central pixels, instead it will be on the top
+        right of those 4 pixels. Make sure your images are centered with
+        respect to that pixel before rotation.
+
+    Parameters
+    ----------
+    tensor_in : torch.Tensor
+        Input image, 2d array.
+    angle : float
+        Rotation angle.
+
+    Returns
+    -------
+    array_out : torch.Tensor
+        Resulting frame.
+
+    """
+    y_ori, x_ori = tensor_in.shape[1:]
+
+    while angle < 0:
+        angle += 360
+    while angle > 360:
+        angle -= 360
+
+    if angle > 45:
+        dangle = angle % 90
+        if dangle > 45:
+            dangle = -(90 - dangle)
+        nangle = int(np.rint(angle / 90))
+        tensor_in = torch.rot90(tensor_in, nangle, [1, 2])
+    else:
+        dangle = angle
+
+    if y_ori % 2 or x_ori % 2:
+        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
+        tensor_in = tensor_in[0, :-1, :-1]
+
+    a = np.tan(np.deg2rad(dangle) / 2).item()
+    b = -np.sin(np.deg2rad(dangle)).item()
+
+    arr_xy = torch.from_numpy(np.mgrid[0:y_ori, 0:x_ori])
+
+    s_x   = tensor_fft_shear(tensor_in, arr_xy[0], a, ax=2)
+    s_xy  = tensor_fft_shear(s_x, arr_xy[1], b, ax=1)
+    s_xyx = tensor_fft_shear(s_xy, arr_xy[0], a, ax=2)
+
+    if y_ori % 2 or x_ori % 2:
+        # shift + crop back to odd dimensions , using FFT
+        array_out = torch.zeros([s_xyx.shape[0] + 1, s_xyx.shape[1] + 1])
+        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
+        array_out[:-1, :-1] = torch.real(s_xyx)
+    else:
+        array_out = torch.real(s_xyx)
+
+    return array_out
+
+
+def tensor_fft_shear(arr, arr_ori, c, ax, pad=0, shift_ini=True):
+    ax2 = 1 - (ax-1) % 2
+    freqs = tf.fftfreq(arr_ori.shape[ax2])
+    sh_freqs = tf.fftshift(freqs)
+    arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax-1], 1))
+    if ax == 2:
+        arr_u = arr_u.T
+    s_x = tf.fftshift(arr)
+    s_x = tf.fft(s_x, axis=ax)
+    s_x = tf.fftshift(s_x)
+    s_x = np.exp(-2j * torch.pi * c * arr_u * arr_ori) * s_x
+    s_x = tf.fftshift(s_x)
+    s_x = tf.ifft(s_x, axis=ax)
+    s_x = tf.fftshift(s_x)
+
+    return s_x
+
+
 def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss):
     L_np = L.detach().numpy()[0, :, :]
     X_np = x.detach().numpy()[0, :, :]
@@ -187,7 +279,7 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss):
     plt.ioff()
     plt.figure("Iterations plot temporary")
 
-    plt.suptitle("Iteration n°" + str(bfgs_iter) + "\nLoss  = {:.2e}".format(loss))
+    plt.suptitle("Iteration n°" + str(bfgs_iter) + "\nLoss  = {:.6e}".format(loss))
     args = {"cmap": "magma", "vmax": np.percentile(L_np, 98), "vmin": np.percentile(L_np, 0)}
 
     plt.subplot(1, 2, 1), plt.imshow(L_np, **args), plt.title("L estimation from pcait init")
@@ -205,7 +297,7 @@ def iter_to_gif(name="sim"):
 
     for file in sorted(glob.glob("./iter/*.png"), key=os.path.getmtime):
         images.append(Image.open(file))
-    images[0].save(fp=save_gif + str(name) + ".gif", format='GIF', append_images=images, save_all=True, duration=300,
+    images[0].save(fp=save_gif + str(name) + ".gif", format='GIF', append_images=images, save_all=True, duration=500,
                    loop=0)
 
     ii = 0
