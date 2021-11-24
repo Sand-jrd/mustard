@@ -111,10 +111,6 @@ def sobel_tensor_conv(tensor):
 
     return filtered
 
-
-save_gif = "./"
-
-
 def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
     """ Rotates Tensor using Fourier transform phases:
         Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
@@ -168,15 +164,17 @@ def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
         # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
         tensor_in = tensor_in[0, :-1, :-1]
 
+    y_ori, x_ori = tensor_in.shape[1:]
+
     a = np.tan(np.deg2rad(dangle) / 2).item()
     b = -np.sin(np.deg2rad(dangle)).item()
 
     arr_xy = torch.from_numpy(np.mgrid[0:y_ori, 0:x_ori])
     arr_xy -= x_ori // 2
 
-    s_x = tensor_fft_shear(tensor_in, arr_xy[0], a, ax=2)
-    s_xy = tensor_fft_shear(s_x, arr_xy[1], b, ax=1)
-    s_xyx = tensor_fft_shear(s_xy, arr_xy[0], a, ax=2)
+    s_x = tensor_fft_shear(tensor_in, arr_xy[1], a, ax=2)
+    s_xy = tensor_fft_shear(s_x, arr_xy[0], b, ax=1)
+    s_xyx = tensor_fft_shear(s_xy, arr_xy[1], a, ax=2)
 
     if y_ori % 2 or x_ori % 2:
         # shift + crop back to odd dimensions , using FFT
@@ -190,18 +188,18 @@ def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
 
 
 def tensor_fft_shear(arr, arr_ori, c, ax, pad=0, shift_ini=True):
-    ax2 = 1 - (ax - 1) % 2
-    freqs = tf.fftfreq(arr_ori.shape[ax2])
+    ax2 = 1 - (ax-1) % 2
+    freqs = tf.fftfreq(arr_ori.shape[ax2], dtype=torch.float64)
     sh_freqs = tf.fftshift(freqs)
-    arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax - 1], 1))
+    arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax-1], 1))
     if ax == 2:
-        arr_u = arr_u.T
+        arr_u = torch.transpose(arr_u,0,1)
     s_x = tf.fftshift(arr)
-    s_x = tf.fft(s_x, axis=ax)
+    s_x = tf.fft(s_x, dim=ax)
     s_x = tf.fftshift(s_x)
-    s_x = np.exp(-2j * torch.pi * c * arr_u * arr_ori) * s_x
+    s_x = torch.exp(-2j * torch.pi * c * arr_u * arr_ori) * s_x
     s_x = tf.fftshift(s_x)
-    s_x = tf.ifft(s_x, axis=ax)
+    s_x = tf.ifft(s_x, dim=ax)
     s_x = tf.fftshift(s_x)
 
     return s_x

@@ -20,7 +20,7 @@ datadir = "./example-data"
 
 Test_greed = False
 Test_model = False
-Test_mayo = True
+Test_mayo  = True
 
 regul_weight = 0
 delta = 1e4
@@ -29,17 +29,17 @@ maxiter = 7
 # %% -------------------------------------
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, delta)
+estimator = mayo_estimator(datadir, delta=delta, rot="fft", loss="mse")
 shape = estimator.shape
 model = estimator.model
 angles, psf, science_data = estimator.get_science_data()
 
 # %% Test Greed
 
-L_ini, X_ini = estimator.initalisation(from_dir=datadir + "/L0X0")
+L_ini, X_ini = estimator.initialisation(from_dir=datadir + "/L0X0")
 
 if Test_greed:
-    L_ini, X_ini = estimator.initalisation(save=datadir + "/L0X0", max_comp=4, nb_iter=10)
+    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", max_comp=4, nb_iter=10)
 
     # ___________________
     # Show results

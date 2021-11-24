@@ -71,7 +71,7 @@ class mayo_estimator:
         elif loss == 'mse':
             self.fun_loss = MSELoss(reduction='sum')
 
-    def initalisation(self, from_dir=None, save=None, **kwargs):
+    def initialisation(self, from_dir=None, save=None, **kwargs):
         """ The first step with greed aim to find a good initialisation 
          
          Parameters
