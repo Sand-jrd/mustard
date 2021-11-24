@@ -15,65 +15,11 @@ ______________________________
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
-
-# Syntax wrapper for simplify minimize  usage.
 import torch
-from torch.nn.functional import conv2d
-import torch.fft as tf
 
 # File management
 from vip_hci.fits import open_fits
 import json, glob, os
-
-
-def var_inline(L, x):
-    """ Wrap parameters as a vector to fit minimize syntax  Parameters
-    
-    Parameters 
-    ----------
-     L,x : ndarray
-         Variables input of minimize
-
-     Returns
-     -------
-     x0 : array
-         inline array of the concatenated variables
-     
-  """
-    if not (len(L.shape) == 2 and len(x.shape) == 2 and x.shape == L.shape):
-        raise ValueError('L and x are supposed to be matrix 2D of same dimensions')
-    return np.concatenate((L.flatten(), x.flatten()), axis=None)
-
-
-def var_inmatrix(M, size):
-    """ Unwrap parameters from minimize (which is a big vector) into matrices
-        Matching the order we wrapped it in var inline.
-   
-    Parameters
-    ----------
-    M : array
-        Variables taken from minimize which is an inline array of
-        concatenated parameters
-    
-    size : int
-        dimensions of matrix
-    
-    Returns
-    -------
-    L,x : ndarray
-        Unwrapped parameters
-    
- """
-    if M.size != (2 * size * size):
-        raise ValueError("length of vector doesn't match expected value")
-
-    mat_length = size * size
-
-    # As we define in var_inline, L should be first then x
-    L = M[:mat_length].reshape(size, size)
-    x = M[mat_length:].reshape(size, size)
-
-    return L, x
 
 
 # %% Create patterns
@@ -136,142 +82,6 @@ def unpack_science_datadir(datadir):
     return angles, psf, science_data
 
 
-def laplacian_tensor_conv(tensor, kernel_size=3):
-    """ Apply laplacian filter on input tensor X"""
-
-    kernel3 = torch.Tensor([[[[-1, -1, -1],
-                              [-1, 8, -1],
-                              [-1, -1, -1]]]])
-    kernel5 = torch.Tensor([[[[-4, -1, 0, -1, -4],
-                              [-1, 2, 3, 2, -1],
-                              [0, 3, 4, 3, 0],
-                              [-1, 2, 3, 2, -1],
-                              [-4, -1, 0, -1, -4]]]])
-    kernel7 = torch.Tensor([[[[-10, -5, -2, -1, -2, -5, -10],
-                              [-5, 0, 3, 4, 3, 0, -5],
-                              [-2, 3, 6, 7, 6, 3, -2],
-                              [-1, 4, 7, 8, 7, 4, -1],
-                              [-2, 3, 6, 7, 6, 3, -2],
-                              [-5, 0, 3, 4, 3, 0, -5],
-                              [-10, -5, -2, -1, -2, -5, -10]]]])
-    if kernel_size == 3:
-        kernel = kernel3
-    elif kernel_size == 5:
-        kernel = kernel5
-    elif kernel_size == 7:
-        kernel = kernel7
-    else:
-        raise ValueError('Kernel size must be either 3, 5 or 7.')
-    filtered = conv2d(torch.unsqueeze(tensor, 0), kernel, padding='same')
-
-    return filtered
-
-
-def sobel_tensor_conv(tensor):
-    """ Apply laplacian filter on input tensor X"""
-
-    kernel = torch.Tensor([[[[1, 0, -1],
-                             [2, 0, -2],
-                             [1, 0, -1]]]])
-    filtered = conv2d(torch.unsqueeze(tensor, 0), kernel, padding='same')
-
-    return filtered
-
-
-save_gif = "./"
-
-
-def tensor_rotate_fft(tensor_in:torch.Tensor, angle:float) -> torch.Tensor:
-    """ Rotates Tensor using Fourier transform phases:
-        Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
-        See details in Larkin et al. (1997) and Hagelberg et al. (2016).
-        Note: this is significantly slower than interpolation methods
-        (e.g. opencv/lanczos4 or ndimage), but preserves the flux better
-        (by construction it preserves the total power). It is more prone to
-        large-scale Gibbs artefacts, so make sure no sharp edge is present in
-        the image to be rotated.
-
-        /!\ This is a blindly coded adaptation for Tensor of the vip function rotate_fft
-        (https://github.com/vortex-exoplanet/VIP/blob/51e1d734dcdbee1fbd0175aa3d0ab62eec83d5fa/vip_hci/preproc/derotation.py#L507)
-
-        /!\ This suppose the frame is perfectly centred
-
-        ! Warning: if input frame has even dimensions, the center of rotation
-        will NOT be between the 4 central pixels, instead it will be on the top
-        right of those 4 pixels. Make sure your images are centered with
-        respect to that pixel before rotation.
-
-    Parameters
-    ----------
-    tensor_in : torch.Tensor
-        Input image, 2d array.
-    angle : float
-        Rotation angle.
-
-    Returns
-    -------
-    array_out : torch.Tensor
-        Resulting frame.
-
-    """
-    y_ori, x_ori = tensor_in.shape[1:]
-
-    while angle < 0:
-        angle += 360
-    while angle > 360:
-        angle -= 360
-
-    if angle > 45:
-        dangle = angle % 90
-        if dangle > 45:
-            dangle = -(90 - dangle)
-        nangle = int(np.rint(angle / 90))
-        tensor_in = torch.rot90(tensor_in, nangle, [1, 2])
-    else:
-        dangle = angle
-
-    if y_ori % 2 or x_ori % 2:
-        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
-        tensor_in = tensor_in[0, :-1, :-1]
-
-    a = np.tan(np.deg2rad(dangle) / 2).item()
-    b = -np.sin(np.deg2rad(dangle)).item()
-
-    arr_xy = torch.from_numpy(np.mgrid[0:y_ori, 0:x_ori])
-
-    s_x   = tensor_fft_shear(tensor_in, arr_xy[0], a, ax=2)
-    s_xy  = tensor_fft_shear(s_x, arr_xy[1], b, ax=1)
-    s_xyx = tensor_fft_shear(s_xy, arr_xy[0], a, ax=2)
-
-    if y_ori % 2 or x_ori % 2:
-        # shift + crop back to odd dimensions , using FFT
-        array_out = torch.zeros([s_xyx.shape[0] + 1, s_xyx.shape[1] + 1])
-        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
-        array_out[:-1, :-1] = torch.real(s_xyx)
-    else:
-        array_out = torch.real(s_xyx)
-
-    return array_out
-
-
-def tensor_fft_shear(arr, arr_ori, c, ax, pad=0, shift_ini=True):
-    ax2 = 1 - (ax-1) % 2
-    freqs = tf.fftfreq(arr_ori.shape[ax2])
-    sh_freqs = tf.fftshift(freqs)
-    arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax-1], 1))
-    if ax == 2:
-        arr_u = arr_u.T
-    s_x = tf.fftshift(arr)
-    s_x = tf.fft(s_x, axis=ax)
-    s_x = tf.fftshift(s_x)
-    s_x = np.exp(-2j * torch.pi * c * arr_u * arr_ori) * s_x
-    s_x = tf.fftshift(s_x)
-    s_x = tf.ifft(s_x, axis=ax)
-    s_x = tf.fftshift(s_x)
-
-    return s_x
-
-
 def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss):
     L_np = L.detach().numpy()[0, :, :]
     X_np = x.detach().numpy()[0, :, :]
@@ -289,7 +99,7 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss):
     plt.clf()
 
 
-def iter_to_gif(name="sim"):
+def iter_to_gif(save_gif='.', name="sim"):
     images = []
     plt.ion()
 

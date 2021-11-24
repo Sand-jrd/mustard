@@ -19,24 +19,24 @@ from vip_hci.fits import open_fits, write_fits
 from os import mkdir
 from os.path import isdir
 
+# Algos and science model
+from neo_mayo.algo import init_estimate
+import torch
+
+# Loss functions
+from torch.nn import HuberLoss, MSELoss
+import torch.optim as optim
+
+# Other
+from neo_mayo.utils import circle, iter_to_gif, print_iter
+from neo_mayo.model import model_ADI
+
 # For verbose
 from datetime import datetime
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 sep = "\n" + ('_' * 50)
-
-# Minimizers and its wrappers  
-from scipy.optimize import minimize as scipy_minimiz
-from optimparallel import minimize_parallel as parallel_minimiz
-from neo_mayo.utils import var_inmatrix, var_inline
-
-# Algos and science model
-from neo_mayo.algo import init_estimate, compute_L_proj, torch_minimiz
-from neo_mayo.model import model_ADI, call_loss_function, call_loss_grad, create_constrain_list, create_bounds
-
-# Other
-from neo_mayo.utils import circle, iter_to_gif
 
 
 # %%
@@ -48,40 +48,44 @@ class mayo_estimator:
     /!\ Neo-mayo isn't exaclty the same as Mayo pipeline. 
     Some choices have been re-thinked
 
-    Parameters
-    ----------
-    datadir : str
-        name of the data dir
-        data dir should contained fits and a json file in wich it wich data info are 
-        A json template is available in the exemple directory. 
-
     """
 
-    def __init__(self, datadir="./data", mask_size=None):
-        self.create_model_ADI(datadir, mask_size)
+    def __init__(self, datadir="./data", delta=1, mask_size=None, rot="torchvision", loss="mse"):
+
+        # -- Create model and define constants --
+        angles, psf, science_data = unpack_science_datadir(datadir)
+
+        if not mask_size: mask_size = psf.shape[0] // 2 - 2
+        mask = circle(psf.shape, mask_size)
+
+        self.const = {"science_data": mask * science_data}
+        self.model = model_ADI(angles, psf, mask, rot=rot)
+
+        self.shape = psf.shape
+        self.nb_frames = science_data.shape[0]
         self.L0x0 = None
+
+        # -- Define our minimization problem
+        if loss == 'huber':
+            self.fun_loss = HuberLoss(reduction='sum', delta=delta)
+        elif loss == 'mse':
+            self.fun_loss = MSELoss(reduction='sum')
 
     def initalisation(self, from_dir=None, save=None, **kwargs):
         """ The first step with greed aim to find a good initialisation 
          
          Parameters
          ----------
+         save
          from_dir : str (optional)
              if None, compute iterative PCA
-             if a path is given, get L0 and X0 from the directory
-         save : str
-             if a path is given, save L0 and X0 on the directory
-             if None, do not save
-         kwargs : keys arguments
-             will be pass to iterative pca function
-             (see pca_it arguments)
-
+             if a path is given, get L0 (starlight) and X0 (circonstellar) from the directory
          
          Returns
          -------
          L_est, X_est: ndarray
-             Estimated starlight NON-DEROTATED (L) 
-             and circunstlellar contributions DEROTATED (X) 
+             Estimated starlight (L) 
+             and circunstlellar contributions (X) 
          
         """
 
@@ -96,7 +100,7 @@ class mayo_estimator:
             start_time = datetime.now()
             print(sep + "\nInitialisation with Iterative PCA (Greed) ...")
 
-            L0, X0 = init_estimate(self.constantes["science_data"], self.model.rot_angles, **kwargs)
+            L0, X0 = init_estimate(self.const["science_data"], self.model.rot_angles, **kwargs)
 
             print("Done - running time : " + str(datetime.now() - start_time) + sep)
 
@@ -107,32 +111,33 @@ class mayo_estimator:
                 write_fits(save + "/X0.fits", X0, verbose=False)
 
         # -- Define constantes
-        self.L0x0 = var_inline(L0, X0)
-        self.constantes["L_proj"] = compute_L_proj(L0)
+        self.L0x0 = (L0, X0)
 
         return L0, X0
 
-    def estimate(self, delta=1e4, hyper_p=0, minimizer="minimize_parallel", **kwarg):
+    def estimate(self, R_weights=0, maxiter=10, save=False, gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
          
         Parameters
         ----------
-        datadir : str
-            path to the directory where are stored science data
-            This directory should contain a json file describing its content
 
-        delta : float
-            indicating the quadratic vs. linear loss change point of huber loss
+        R_weights : florat
+            Hyperparameter to control regularization weight
 
-        hyper_p : float
-            Hyperparameter to give accurate weight to regularization terme for L prior
+        maxiter : int
+            Maximum number of optimization steps
 
-        **kargs : dict
-             minimize arguments
-             (see scipy.optimize.minimize)
-         
+        save : str or None
+            if path is given, save the result as fits
+            
+        gif : str or None
+            if path is given, save each the minizations step as a gif
+
+        verbose : bool
+            Activate or desactivate print
+
          Returns
          -------
          L_est, X_est: ndarray
@@ -141,69 +146,85 @@ class mayo_estimator:
         """
 
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
-
-        # -- Define constantes 
-        self.constantes["delta"] = delta
-        self.constantes["hyper_p"] = hyper_p
-
-        # -- Default mode; can be changed in 'Options' below
-        self.constantes["regul"] = True
-        fun = call_loss_function
-        jac = None  # call_loss_grad
+        const = self.const
+        loss_evo = []
 
         # ______________________________________
-        # -- Options
+        # Define constantes and convert arry to tensor
 
-        if minimizer == "minimize_parallel": minimiz = parallel_minimiz
+        science_data = torch.unsqueeze(torch.from_numpy(const["science_data"]), 1).float()
+        science_data.requires_grad = False
 
-        if minimizer == "torch":
-            minimiz = torch_minimiz
-            fun = None
-            jac = None
-            gif = True
+        L0, X0 = self.L0x0
 
-        if minimizer == "L-BFGS-B":
-            minimiz = scipy_minimiz
-            kwarg["method"] = "L-BFGS-B"
-            kwarg["bounds"] = create_bounds(self.constantes)
-            kwarg["options"] = {"maxiter": 5, "disp": 100, 'iprint': 100}
+        L0 = self.model.mask * torch.unsqueeze(torch.from_numpy(L0), 0).float()
+        L0.requires_grad = True
 
-        if minimizer == "SLSQP":
-            minimiz = scipy_minimiz
-            kwarg["method"] = "SLSQP"
-            self.constantes["regul"] = False
-            kwarg["constraints"] = create_constrain_list(self.model, self.constantes)
+        X0 = self.model.mask * torch.unsqueeze(torch.from_numpy(X0), 0).float()
+        X0.requires_grad = True
 
         # ______________________________________
-        #  Minimize considering mayo loss model    
+        #  Optimizer definition  
+
+        Lk, Xk = L0, X0
+        optimizer = optim.LBFGS([Lk, Xk])
+
+        # Model and loss at step 0
+        Y = self.model.forward_ADI(Lk, Xk)
+        loss = self.fun_loss(Y, science_data)
+
+        def closure():
+            nonlocal loss
+            optimizer.zero_grad()
+            Yk = self.model.forward_ADI(Lk, Xk)
+            loss = self.fun_loss(Yk, science_data)
+            loss.backward()
+            return loss
+
+        # ______________________________________
+        #  Minimizations Start    
 
         start_time = datetime.now()
         print(sep + "\nResolving mayo optimization problem ...")
 
-        res = minimiz(fun=fun,
-                      jac=jac,
-                      x0=self.L0x0,
-                      args=(self.model, self.constantes),
-                      **kwarg)
+        for k in range(maxiter):
+            loss_evo.append(loss)
+            if verbose: print("Iteration n°" + str(k) + " {:.6e}".format(loss))
+            if gif: print_iter(Lk, Xk, k, loss)
+
+            optimizer.step(closure)
 
         print("Done - Running time : " + str(datetime.now() - start_time))
 
         # ______________________________________
-        # Done, Store and unwrap results !
+        # Done, Store and unwrap results back to numpy array!
+
+        L_est, X_est = L0.detach().numpy()[0, :, :], X0.detach().numpy()[0, :, :]
+
+        # Result dict
+        res = {'state': optimizer.state,
+               'x': (L_est, X_est),
+               'loss_evo': loss_evo}
+
         self.res = res
-        L_est, X_est = var_inmatrix(res['x'], self.model.frame_shape[0])
+
+        # Save
         if gif: iter_to_gif()
+        if save: write_fits(save + "/L_est.fits", L_est), write_fits(save + "/X_est.fits", X_est)
 
         return L_est, X_est
+
+    # _____________________________________________________________
+    # _____________ Tools functions of mayo_estimator _____________
 
     def remove_speckels(self, derot=False):
         """ Remove the speckle map estimation
         This can be better than the X estimation from the minimisation due to rotation flaws
         """
-        if not hasattr(self, 'res'):  raise AssertionError("Estimation should be lunched first")
+        if not hasattr(self, 'res'): raise AssertionError("Estimation should be lunched first")
 
-        science_data = self.constantes["science_data"]
-        L_est, X_est = var_inmatrix(self.res['x'], self.model.frame_shape[0])
+        science_data = self.const["science_data"]
+        L_est, X_est = self.res['x']
         Xs_est = science_data - L_est
 
         if derot:
@@ -211,25 +232,5 @@ class mayo_estimator:
 
         return Xs_est
 
-    # _____________________________________________________________
-    # _____________ Tools functions of mayo_estimator _____________
-
-    def create_model_ADI(self, datadir, mask_size):
-        """ Initialisation of ADI models based on where the given data """
-
-        angles, psf, science_data = unpack_science_datadir(datadir)
-
-        # Set up a default pupil mask size based on the frame size
-        if mask_size == None: mask_size = psf.shape[0] // 2 - 2
-        mask = circle(psf.shape, mask_size)
-
-        # Store science data as it is a constants
-        self.constantes = {"science_data": mask * science_data}
-
-        #  Init and return model ADI
-        self.shape = psf.shape
-        self.nb_frames = science_data.shape[0]
-        self.model = model_ADI(angles, psf, mask)
-
     def get_science_data(self):
-        return self.model.rot_angles, self.model.phi_coro, self.constantes["science_data"]
+        return self.model.rot_angles, self.model.phi_coro, self.const["science_data"]

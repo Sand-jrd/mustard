@@ -5,7 +5,7 @@ Created on Tue Nov  9 14:27:42 2021
 
 ______________________________
 
-| algortihms used in neo-mayo |
+| algorithms used in neo-mayo |
 ______________________________
 
 @author: sand-jrd
@@ -15,13 +15,14 @@ from vip_hci.pca import pca_fullfr
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
 
+import torch
+from torch.nn.functional import conv2d
+import torch.fft as tf
+
 import numpy as np
 
 
-# For verbose
-
-
-# %% Iterative PCA aka GREED
+# %% Initialisation / kind of PCA / PCA iter
 
 def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
     """ Iterative PCA as describe in Mayo """
@@ -66,78 +67,141 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
     return np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
 
 
-# %% Minimizer with toch
+# %% Operator on tensors
+# Mostly copies of vip functiun adapted to tensors
 
-import torch
-import torch.optim as optim
-from neo_mayo.model import regul_L_torch, regul_X
-from neo_mayo.utils import var_inmatrix, var_inline, print_iter
+def laplacian_tensor_conv(tensor, kernel_size=3):
+    """ Apply laplacian filter on input tensor X"""
 
+    kernel3 = torch.Tensor([[[[-1, -1, -1],
+                              [-1, 8, -1],
+                              [-1, -1, -1]]]])
+    kernel5 = torch.Tensor([[[[-4, -1, 0, -1, -4],
+                              [-1, 2, 3, 2, -1],
+                              [0, 3, 4, 3, 0],
+                              [-1, 2, 3, 2, -1],
+                              [-4, -1, 0, -1, -4]]]])
+    kernel7 = torch.Tensor([[[[-10, -5, -2, -1, -2, -5, -10],
+                              [-5, 0, 3, 4, 3, 0, -5],
+                              [-2, 3, 6, 7, 6, 3, -2],
+                              [-1, 4, 7, 8, 7, 4, -1],
+                              [-2, 3, 6, 7, 6, 3, -2],
+                              [-5, 0, 3, 4, 3, 0, -5],
+                              [-10, -5, -2, -1, -2, -5, -10]]]])
+    if kernel_size == 3:
+        kernel = kernel3
+    elif kernel_size == 5:
+        kernel = kernel5
+    elif kernel_size == 7:
+        kernel = kernel7
+    else:
+        raise ValueError('Kernel size must be either 3, 5 or 7.')
+    filtered = conv2d(torch.unsqueeze(tensor, 0), kernel, padding='same')
 
-def torch_minimiz(fun, x0, args, nb_iter=10, gif=True, **kwarg):
-    if "options" in kwarg.keys():
-        options = kwarg["options"]
-        if "maxiter" in options.keys(): nb_iter = options["maxiter"]
-
-    model = args[0]
-    constantes = args[1]
-
-    R_weight = constantes["hyper_p"]
-
-    model.adapt_torch(delta=constantes["delta"])
-
-    science_data = torch.unsqueeze(torch.from_numpy(constantes["science_data"]), 1).float()
-    science_data.requires_grad = False
-
-    constantes["L_proj"] = torch.unsqueeze(torch.from_numpy(constantes["L_proj"]), 0).float()
-    constantes["L_proj"].requires_grad = False
-
-    L0, X0 = var_inmatrix(x0, model.frame_shape[0])
-
-    L0 = model.mask * torch.unsqueeze(torch.from_numpy(L0), 0).float()
-    L0.requires_grad = True
-
-    X0 = model.mask * torch.unsqueeze(torch.from_numpy(X0), 0).float()
-    X0.requires_grad = True
-
-    optimizer = optim.LBFGS([L0, X0])
-
-    Y = model.forward_torch_ADI(L0, X0)
-    global loss
-    loss = model.hub_loss(Y, science_data)
-
-    def closure():
-        global loss
-        optimizer.zero_grad()
-        Y = model.forward_torch_ADI(L0, X0)
-        R = R_weight * regul_X(X0)
-        loss = model.hub_loss(Y, science_data) + R
-        loss.backward()
-        print("Iteration n°" + str(ii) + " {:.6e}".format(model.hub_loss(Y, science_data) + R))
-        return loss
-
-    for ii in range(nb_iter):
-        if gif: print_iter(L0, X0, ii, loss)
-        optimizer.step(closure)
-
-    # Back to numpy array
-    L0 = L0.detach().numpy()[0, :, :]
-    X0 = X0.detach().numpy()[0, :, :]
-
-    res = dict()
-    res["state"] = optimizer.state
-    res['x'] = var_inline(abs(L0), abs(X0))
-
-    return res
+    return filtered
 
 
-# %% Other ALGO
+def sobel_tensor_conv(tensor):
+    """ Apply laplacian filter on input tensor X"""
+
+    kernel = torch.Tensor([[[[1, 0, -1],
+                             [2, 0, -2],
+                             [1, 0, -1]]]])
+    filtered = conv2d(torch.unsqueeze(tensor, 0), kernel, padding='same')
+
+    return filtered
 
 
-def compute_L_proj(L_est):
-    """ Compute a L projector """
+save_gif = "./"
 
-    U, S, V = np.linalg.svd(L_est)
-    proj = U @ np.transpose(U)
 
-    return proj
+def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
+    """ Rotates Tensor using Fourier transform phases:
+        Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
+        See details in Larkin et al. (1997) and Hagelberg et al. (2016).
+        Note: this is significantly slower than interpolation methods
+        (e.g. opencv/lanczos4 or ndimage), but preserves the flux better
+        (by construction it preserves the total power). It is more prone to
+        large-scale Gibbs artefacts, so make sure no sharp edge is present in
+        the image to be rotated.
+
+        /!\ This is a blindly coded adaptation for Tensor of the vip function rotate_fft
+        (https://github.com/vortex-exoplanet/VIP/blob/51e1d734dcdbee1fbd0175aa3d0ab62eec83d5fa/vip_hci/preproc/derotation.py#L507)
+
+        /!\ This suppose the frame is perfectly centred
+
+        ! Warning: if input frame has even dimensions, the center of rotation
+        will NOT be between the 4 central pixels, instead it will be on the top
+        right of those 4 pixels. Make sure your images are centered with
+        respect to that pixel before rotation.
+
+    Parameters
+    ----------
+    tensor_in : torch.Tensor
+        Input image, 2d array.
+    angle : float
+        Rotation angle.
+
+    Returns
+    -------
+    array_out : torch.Tensor
+        Resulting frame.
+
+    """
+    y_ori, x_ori = tensor_in.shape[1:]
+
+    while angle < 0:
+        angle += 360
+    while angle > 360:
+        angle -= 360
+
+    if angle > 45:
+        dangle = angle % 90
+        if dangle > 45:
+            dangle = -(90 - dangle)
+        nangle = int(np.rint(angle / 90))
+        tensor_in = torch.rot90(tensor_in, nangle, [1, 2])
+    else:
+        dangle = angle
+
+    if y_ori % 2 or x_ori % 2:
+        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
+        tensor_in = tensor_in[0, :-1, :-1]
+
+    a = np.tan(np.deg2rad(dangle) / 2).item()
+    b = -np.sin(np.deg2rad(dangle)).item()
+
+    arr_xy = torch.from_numpy(np.mgrid[0:y_ori, 0:x_ori])
+    arr_xy -= x_ori // 2
+
+    s_x = tensor_fft_shear(tensor_in, arr_xy[0], a, ax=2)
+    s_xy = tensor_fft_shear(s_x, arr_xy[1], b, ax=1)
+    s_xyx = tensor_fft_shear(s_xy, arr_xy[0], a, ax=2)
+
+    if y_ori % 2 or x_ori % 2:
+        # shift + crop back to odd dimensions , using FFT
+        array_out = torch.zeros([s_xyx.shape[0] + 1, s_xyx.shape[1] + 1])
+        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
+        array_out[:-1, :-1] = torch.real(s_xyx)
+    else:
+        array_out = torch.real(s_xyx)
+
+    return array_out
+
+
+def tensor_fft_shear(arr, arr_ori, c, ax, pad=0, shift_ini=True):
+    ax2 = 1 - (ax - 1) % 2
+    freqs = tf.fftfreq(arr_ori.shape[ax2])
+    sh_freqs = tf.fftshift(freqs)
+    arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax - 1], 1))
+    if ax == 2:
+        arr_u = arr_u.T
+    s_x = tf.fftshift(arr)
+    s_x = tf.fft(s_x, axis=ax)
+    s_x = tf.fftshift(s_x)
+    s_x = np.exp(-2j * torch.pi * c * arr_u * arr_ori) * s_x
+    s_x = tf.fftshift(s_x)
+    s_x = tf.ifft(s_x, axis=ax)
+    s_x = tf.fftshift(s_x)
+
+    return s_x
