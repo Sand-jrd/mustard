@@ -102,12 +102,16 @@ def laplacian_tensor_conv(tensor, kernel_size=3):
 
 
 def sobel_tensor_conv(tensor):
-    """ Apply laplacian filter on input tensor X"""
+    """ Apply sovel filter on input tensor X"""
 
-    kernel = torch.Tensor([[[[1, 0, -1],
+    kernel = np.array([[[1, 0, -1],
                              [2, 0, -2],
-                             [1, 0, -1]]]])
-    filtered = conv2d(torch.unsqueeze(tensor, 0), kernel, padding='same')
+                             [1, 0, -1]]], dtype='float64')
+
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+
+    shape = tensor.shape
+    filtered = conv2d(tensor.reshape( (1,) + shape), kernel, padding='same')
 
     return filtered
 

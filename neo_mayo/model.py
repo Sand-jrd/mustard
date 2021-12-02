@@ -65,11 +65,11 @@ class model_ADI:
     def forward_ADI(self, L, x):
         """ Process forward model as describe in mayo : Y = M * ( L + conv(phi,R(x)) )  """
 
-        Y = torch.zeros((self.nb_frame,) + L.shape)
+        Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
         for frame_id in range(self.nb_frame):
             Rx = torch.abs(self.rot(x, float(self.rot_angles[frame_id]), **self.rot_args))
             # conv_Rx = self.conv(self.phi_coro,Rx)
-            Y[frame_id] = self.mask * (torch.abs(L) + Rx.abs())
+            Y[frame_id] = torch.abs(L) + Rx.abs()
 
         return Y

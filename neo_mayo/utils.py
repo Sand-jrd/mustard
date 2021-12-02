@@ -21,6 +21,9 @@ import torch
 from vip_hci.fits import open_fits
 import json, glob, os
 
+BoxStyle = dict(boxstyle='square', pad=1.3, mutation_scale=0.01, facecolor='indigo', alpha=0.65)
+FontStyle = dict(family= 'sans', color= 'beige', weight='normal', size= 12)
+from datetime import datetime
 
 # %% Create patterns
 
@@ -82,32 +85,50 @@ def unpack_science_datadir(datadir):
     return angles, psf, science_data
 
 
-def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss):
+def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, kactiv):
     L_np = L.detach().numpy()[0, :, :]
     X_np = x.detach().numpy()[0, :, :]
 
     plt.ioff()
-    plt.figure("Iterations plot temporary")
+    plt.subplots(2, 2, figsize=(16, 9), gridspec_kw={'height_ratios': [3, 1]})
 
     plt.suptitle("Iteration n°" + str(bfgs_iter) + "\nLoss  = {:.6e}".format(loss))
     args = {"cmap": "magma", "vmax": np.percentile(L_np, 98), "vmin": np.percentile(L_np, 0)}
 
-    plt.subplot(1, 2, 1), plt.imshow(L_np, **args), plt.title("L estimation from pcait init")
-    plt.subplot(1, 2, 2), plt.imshow(X_np, **args), plt.title("X estimation from pcait init")
+    if not bfgs_iter : title = "Initialisation"
+    else : title = "Estimation of L and X at iteration n°" + str(bfgs_iter)
+
+    plt.suptitle(title)
+
+    plt.subplot(2, 2, 1), plt.imshow(L_np, **args), plt.title("L (starlight) ")
+    plt.subplot(2, 2, 2), plt.imshow(X_np, **args), plt.title("X (circonstellar light)")
+
+    infos = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
+            "\n w_r = {:.2f}".format(w_r)
+    if kactiv : infos += ", R activation at iteration : " + str(kactiv)
+    infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
+            "\n   R = {:.4e} ({:.0f}%)".format(R, 100*R/(loss)) + "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss)
+
+    plt.subplot2grid((2,2), (1,0), colspan=2), plt.axis('off'), plt.text(0.3, 0, infos, bbox=BoxStyle, fontdict=FontStyle)
 
     plt.savefig("./iter/" + str(bfgs_iter) + ".png", pad_inches=0.5)
     plt.clf()
+    plt.close()
 
 
 def iter_to_gif(save_gif='.', name="sim"):
     images = []
     plt.ion()
 
+    date = datetime.now()
     if not os.path.isdir(save_gif): os.makedirs(save_gif)
 
+    double_init = True
     for file in sorted(glob.glob("./iter/*.png"), key=os.path.getmtime):
         images.append(Image.open(file))
-    images[0].save(fp=save_gif + str(name) + ".gif", format='GIF', append_images=images, save_all=True, duration=500,
+        if double_init : images.append(Image.open(file)); double_init = False
+
+    images[0].save(fp=save_gif + "/" + str(name) + date.strftime("_%d%b%H%M") +".gif", format='GIF', append_images=images, save_all=True, duration=500,
                    loop=0)
 
     ii = 0
