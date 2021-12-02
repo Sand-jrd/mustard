@@ -85,7 +85,7 @@ def unpack_science_datadir(datadir):
     return angles, psf, science_data
 
 
-def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, kactiv):
+def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, Ractiv):
     L_np = L.detach().numpy()[0, :, :]
     X_np = x.detach().numpy()[0, :, :]
 
@@ -100,12 +100,12 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r
 
     plt.suptitle(title)
 
-    plt.subplot(2, 2, 1), plt.imshow(L_np, **args), plt.title("L (starlight) ")
-    plt.subplot(2, 2, 2), plt.imshow(X_np, **args), plt.title("X (circonstellar light)")
+    plt.subplot(2, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) ")
+    plt.subplot(2, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
 
     infos = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
             "\n w_r = {:.2f}".format(w_r)
-    if kactiv : infos += ", R activation at iteration : " + str(kactiv)
+    infos += ", R is activated" if Ractiv else ", R is deactivated"
     infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
             "\n   R = {:.4e} ({:.0f}%)".format(R, 100*R/(loss)) + "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss)
 

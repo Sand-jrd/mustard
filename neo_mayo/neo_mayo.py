@@ -13,7 +13,6 @@ ______________________________
 """
 
 # For file managment
-import matplotlib.pyplot as plt
 
 from neo_mayo.utils import unpack_science_datadir
 from vip_hci.preproc import frame_rotate
@@ -76,7 +75,7 @@ class mayo_estimator:
             self.fun_loss = MSELoss(reduction='sum')
 
         if regul == "smooth_with_edges":
-            self.regul = lambda X: torch.sum(torch.sqrt(torch.abs(sobel_tensor_conv(X) - epsi)))
+            self.regul = lambda X: torch.sum(sobel_tensor_conv(X)**2 - epsi**2)
         elif regul == "smooth":
             self.regul = lambda X: torch.sum(sobel_tensor_conv(X)**2)
         elif regul == "l1":
@@ -128,7 +127,7 @@ class mayo_estimator:
 
         return L0, X0
 
-    def estimate(self, w_r=0, maxiter=10, kactiv=0, save=False, gif=False, verbose=False):
+    def estimate(self, w_r=0, maxiter=10, kactiv=0, kdactiv=None, save=False, gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
@@ -161,6 +160,7 @@ class mayo_estimator:
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
         const = self.const
         Ractiv = 0 if kactiv else 1
+        if not kdactiv : kdactiv = maxiter
         loss_evo = []
 
         # ______________________________________
@@ -189,8 +189,7 @@ class mayo_estimator:
         R = w_r * self.regul(Xk)
 
         def closure():
-            nonlocal R
-            nonlocal loss
+            nonlocal R, loss
             optimizer.zero_grad()
             with torch.autograd.detect_anomaly():
                 Yk = self.model.forward_ADI(Lk, Xk)
@@ -211,11 +210,13 @@ class mayo_estimator:
         for k in range(maxiter):
             loss_evo.append(loss)
             if verbose: print("Iteration n°" + str(k) + " {:.6e}".format(loss) +
-                                "\n\tWith R = {:.4e} ({:.0f}%)".format(R, 100*R/(loss)) +
+                                "\n\tWith R = {:.4e} ({:.0f}%)".format(R, 100 * R / loss) +
                                  "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss))
-            if gif: print_iter(Lk, Xk, k, loss, R, self.config, w_r, kactiv)
+            if gif: print_iter(Lk, Xk, k, loss, R, self.config, w_r, Ractiv)
 
-            if k > kactiv: Ractiv = 1  # Only activate regul after few iterations
+            if k > kactiv  : Ractiv = 1  # Only activate regul after few iterations
+            if k > kdactiv : Ractiv = 0  # Shut down regul after few iterations
+
             optimizer.step(closure)
 
         print("Done - Running time : " + str(datetime.now() - start_time))
@@ -278,8 +279,8 @@ class mayo_estimator:
             X_est[x, y] += np.min(L_est[x, y])
             L_est[x, y] -= np.min(L_est[x, y])
 
-        self.rad_L = rad_L;
-        self.rad_X = rad_X
+        self.rad_L = rad_L; self.rad_X = rad_X
+
         return L_est, X_est
 
     def get_science_data(self):

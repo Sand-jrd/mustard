@@ -24,10 +24,11 @@ Test_regul  = False
 Test_mayo   = True
 i_have_time = False # Extra outputs
 
-regul_weight = 0.3
-kactiv = 3
+regul_weight = 0.5
+kactiv  = 3
+kdactiv = 8
 delta = 1e4
-maxiter = 10
+maxiter = 15
 
 # %% -------------------------------------
 
@@ -116,7 +117,7 @@ if Test_regul :
 if Test_mayo:
 
     L_est, X_est = estimator.estimate(w_r=regul_weight,
-                                      maxiter=maxiter,kactiv=kactiv,
+                                      maxiter=maxiter,kactiv=kactiv,kdactiv=kdactiv,
                                       save=False, gif=True, verbose=True)
     
     # Complete results are stored in the estimator
