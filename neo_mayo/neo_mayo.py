@@ -110,11 +110,11 @@ class mayo_estimator:
 
             # -- Iterative PCA for variable init -- #
             start_time = datetime.now()
-            print(sep + "\nInitialisation with Iterative PCA (Greed) ...")
+            print(sep + "\nInitialisation  ...")
 
             L0, X0 = init_estimate(self.const["science_data"], self.model.rot_angles, **kwargs)
 
-            print("Done - running time : " + str(datetime.now() - start_time) + sep)
+            print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
             if save:
                 if not isdir(save): mkdir(save)
@@ -214,8 +214,8 @@ class mayo_estimator:
                                  "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss))
             if gif: print_iter(Lk, Xk, k, loss, R, self.config, w_r, Ractiv)
 
-            if k > kactiv  : Ractiv = 1  # Only activate regul after few iterations
-            if k > kdactiv : Ractiv = 0  # Shut down regul after few iterations
+            if kactiv  and k > kactiv  : Ractiv = 1  # Only activate regul after few iterations
+            if kdactiv and k > kdactiv : Ractiv = 0  # Shut down regul after few iterations
 
             optimizer.step(closure)
 

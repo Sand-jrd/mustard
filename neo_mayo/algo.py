@@ -32,7 +32,7 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
     nb_frame = cube.shape[0]
 
     if mode == "sand":
-
+        print("Mode pca iterative by sand ")
         for iter_k in range(n_it):
             for nb_comp in range(ncomp_step):
 
@@ -45,15 +45,15 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
                     X_k[frame_id] = frame_id_rot.clip(min=0)
 
     if mode == "pca":
-
-        res = pca_fullfr.pca(L_k, angle_list, ncomp=ncomp_step, verbose=False)
+        print("Mode pca")
+        res = pca_fullfr.pca(cube, angle_list, ncomp=ncomp_step, verbose=False)
 
         for frame_id in range(nb_frame):
             frame_id_rot = frame_rotate(res, angle_list[frame_id])
             L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
 
     else:
-
+        print("Mode pca iterative")
         res = pca_it(cube, angle_list,
                      mode=mode,
                      ncomp_step=ncomp_step,

@@ -18,17 +18,17 @@ import torch
 # Choose where to get datas
 datadir = "./example-data"
 
-Test_greed  = False
+Test_ini    = True
 Test_model  = False
 Test_regul  = False
 Test_mayo   = True
 i_have_time = False # Extra outputs
 
-regul_weight = 0.5
-kactiv  = 3
-kdactiv = 8
+regul_weight = 0
+kactiv  = None
+kdactiv = None
 delta = 1e4
-maxiter = 15
+maxiter = 6
 
 # %% -------------------------------------
 
@@ -42,8 +42,8 @@ angles, psf, science_data = estimator.get_science_data()
 
 L_ini, X_ini = estimator.initialisation(from_dir=datadir + "/L0X0")
 
-if Test_greed:
-    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", max_comp=4, nb_iter=10)
+if Test_ini:
+    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", mode="pca", max_comp=1, nb_iter=10)
 
     # ___________________
     # Show results
