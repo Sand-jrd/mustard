@@ -32,22 +32,19 @@ class model_ADI:
              x = circumstellar flux
      """
 
-    def __init__(self, rot_angles: np.array, phi_coro: np.array, mask: np.array, rot="fft"):
+    def __init__(self, rot_angles: np.array, mask: np.array, rot="fft"):
 
         # -- Constants
 
         # Frames known rotations list
         self.rot_angles = rot_angles
 
-        # Response of the coronograph
-        self.phi_coro = torch.unsqueeze(torch.from_numpy(phi_coro), 0)
-
         # Pupil mask
         self.mask = torch.unsqueeze(torch.from_numpy(mask), 0)
 
         # Sizes
         self.nb_frame = len(rot_angles)
-        self.frame_shape = phi_coro.shape
+        self.frame_shape = mask.shape
 
         # -- Functions
 
@@ -62,14 +59,19 @@ class model_ADI:
         self.conv = lambda x, y, **kwargs: torch.abs(torch.fft.ifftshift(
             torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) * torch.fft.fftshift(torch.fft.fft2(y)))))
 
-    def forward_ADI(self, L, x):
-        """ Process forward model as describe in mayo : Y = M * ( L + conv(phi,R(x)) )  """
+    def forward_ADI(self, L, x, L_I=None):
+        """ Process forward model  : Y =  ( l_i * L + R(x)) )  """
+
+        if L_I is None: L_I = torch.ones(self.nb_frame-1)
 
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
-        for frame_id in range(self.nb_frame):
+        # First image. No intensity vector
+        Rx = self.rot(x.abs(), float(self.rot_angles[0]), **self.rot_args)
+        Y[0] = L + Rx
+
+        for frame_id in range(1,self.nb_frame):
             Rx = self.rot(x.abs(), float(self.rot_angles[frame_id]), **self.rot_args)
-            # conv_Rx = self.conv(self.phi_coro,Rx)
-            Y[frame_id] = L + Rx
+            Y[frame_id] = L_I[frame_id-1] * L + Rx
 
         return Y

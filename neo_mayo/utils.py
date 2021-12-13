@@ -20,10 +20,12 @@ import torch
 # File management
 from vip_hci.fits import open_fits
 import json, glob, os
+from os import mkdir
+from os.path import isdir
+from datetime import datetime
 
 BoxStyle = dict(boxstyle='square', pad=1.3, mutation_scale=0.01, facecolor='indigo', alpha=0.65)
 FontStyle = dict(family= 'sans', color= 'beige', weight='normal', size= 12)
-from datetime import datetime
 
 # %% Create patterns
 
@@ -71,37 +73,41 @@ def unpack_science_datadir(datadir):
         data_info = json.load(read_data_info)
 
         # Checks if all required keys are here
-    required_keys = ("cube", "angles", "psf")
+    required_keys = ("cube", "angles")
     if not all([key in data_info.keys() for key in required_keys]):
         raise AssertionError("Data json info does not contained required keys")
 
     # Open fits
     angles = open_fits(datadir + "/" + data_info["angles"], verbose=False)
-    psf = open_fits(datadir + "/" + data_info["psf"], verbose=False)
-    if len(psf.shape) == 3: psf = psf[data_info["which_psf"]]
 
     science_data = open_fits(datadir + "/" + data_info["cube"], verbose=False)
 
-    return angles, psf, science_data
+    return angles, science_data
 
 
-def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, Ractiv):
-    L_np = L.detach().numpy()[0, :, :]
-    X_np = x.detach().numpy()[0, :, :]
+def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, Ractiv, estimL, L_I, datadir):
+    L_np  = L.detach().numpy()[0, :, :]
+    X_np  = x.detach().numpy()[0, :, :]
+    L_Inp = L_I.detach().numpy()
 
     plt.ioff()
-    plt.subplots(2, 2, figsize=(16, 9), gridspec_kw={'height_ratios': [3, 1]})
+    col = 3 if estimL else 2
+    ratios = [5, 1, 2] if estimL else [3, 1]
+
+    plt.subplots(col, 2, figsize=(16, 9), gridspec_kw={'height_ratios': ratios})
 
     plt.suptitle("Iteration n°" + str(bfgs_iter) + "\nLoss  = {:.6e}".format(loss))
     args = {"cmap": "magma", "vmax": np.percentile(L_np, 98), "vmin": np.percentile(L_np, 0)}
 
     if not bfgs_iter : title = "Initialisation"
-    else : title = "Estimation of L and X at iteration n°" + str(bfgs_iter)
+    else : title = "Estimation of L and X"
+    if estimL : title +=" and L_I"
+    title += " at iteration n°" + str(bfgs_iter)
 
     plt.suptitle(title)
 
-    plt.subplot(2, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) ")
-    plt.subplot(2, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
+    plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) ")
+    plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
 
     infos = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
             "\n w_r = {:.2f}".format(w_r)
@@ -109,22 +115,33 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r
     infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
             "\n   R = {:.4e} ({:.0f}%)".format(R, 100*R/(loss)) + "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss)
 
-    plt.subplot2grid((2,2), (1,0), colspan=2), plt.axis('off'), plt.text(0.3, 0, infos, bbox=BoxStyle, fontdict=FontStyle)
+    if estimL :
+        LIinfo = "I min : " + str(np.min(L_Inp)) + "\nI max : " + str(np.max(L_Inp))
+        estimBox = dict(boxstyle='square', facecolor='beige', edgecolor='indigo', alpha=0.65)
+        plt.subplot2grid((col,2), (1,0), colspan=2), plt.bar(range(2, len(L_Inp)+2), L_Inp-1, color='beige', edgecolor="black")
+        plt.xticks(range(1,len(L_Inp)+2))
+        plt.text(0, 0, LIinfo, bbox=estimBox, fontdict={'color':'indigo'})
+        plt.title("L_I variations")
+        plt.ylabel("I factor diff"), plt.xlabel("frameID")
 
-    plt.savefig("./iter/" + str(bfgs_iter) + ".png", pad_inches=0.5)
+    plt.subplot2grid((col,2), (2,0), colspan=2), plt.axis('off'), plt.text(0.3, -0.2, infos, bbox=BoxStyle, fontdict=FontStyle)
+
+    if not datadir : datadir = "."
+    if not isdir(datadir + "/iter/"): mkdir(datadir + "/iter/")
+    plt.savefig(datadir + "/iter/" + str(bfgs_iter) + ".png", pad_inches=0.5)
     plt.clf()
     plt.close()
 
 
-def iter_to_gif(save_gif='.', name="sim"):
+def iter_to_gif(save_gif, name="sim"):
     images = []
     plt.ion()
 
     date = datetime.now()
-    if not os.path.isdir(save_gif): os.makedirs(save_gif)
+    if not save_gif: save_gif = "."
 
     double_init = True
-    for file in sorted(glob.glob("./iter/*.png"), key=os.path.getmtime):
+    for file in sorted(glob.glob(save_gif + "/iter/*.png"), key=os.path.getmtime):
         images.append(Image.open(file))
         if double_init : images.append(Image.open(file)); double_init = False
 
@@ -141,3 +158,5 @@ def iter_to_gif(save_gif='.', name="sim"):
                 "Can't delete saves for gif. A process might not have closed properly. "
                 "\nIgnore deletion \nI highly suggest you to delete it.")
         ii += 1
+    try: os.rmdir(save_gif + "/iter")
+    except PermissionError: print("Can't delete temporary iter/ directory.")

@@ -56,17 +56,18 @@ class mayo_estimator:
                  regul="smooth"):
 
         # -- Create model and define constants --
-        angles, psf, science_data = unpack_science_datadir(datadir)
+        angles, science_data = unpack_science_datadir(datadir)
 
-        if not mask_size: mask_size = psf.shape[0] // 2 - 2
-        mask = circle(psf.shape, mask_size)
-
-        self.const = {"science_data": science_data}
-        self.model = model_ADI(angles, psf, mask, rot=rot)
-
-        self.shape = psf.shape
+        self.shape = science_data[0].shape
         self.nb_frames = science_data.shape[0]
         self.L0x0 = None
+
+        if not mask_size: mask_size = self.shape[0] // 2 - 2
+        mask = circle(self.shape, mask_size)
+
+        self.const = {"science_data": science_data}
+        self.model = model_ADI(angles, mask, rot=rot)
+
 
         # -- Define our minimization problem
         if loss == 'huber':
@@ -75,9 +76,9 @@ class mayo_estimator:
             self.fun_loss = MSELoss(reduction='sum')
 
         if regul == "smooth_with_edges":
-            self.regul = lambda X: torch.sum(sobel_tensor_conv(X)**2 - epsi**2)
+            self.regul = lambda X: torch.sum(sobel_tensor_conv(X) ** 2 - epsi ** 2)
         elif regul == "smooth":
-            self.regul = lambda X: torch.sum(sobel_tensor_conv(X)**2)
+            self.regul = lambda X: torch.sum(sobel_tensor_conv(X) ** 2)
         elif regul == "l1":
             self.regul = lambda X: torch.sum(torch.abs(X))
 
@@ -127,7 +128,7 @@ class mayo_estimator:
 
         return L0, X0
 
-    def estimate(self, w_r=0, maxiter=10, kactiv=0, kdactiv=None, save=False, gif=False, verbose=False):
+    def estimate(self, w_r=0, maxiter=10, kactiv=0, kdactiv=None, estimI=False, save=False, gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
@@ -160,7 +161,7 @@ class mayo_estimator:
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
         const = self.const
         Ractiv = 0 if kactiv else 1
-        if not kdactiv : kdactiv = maxiter
+        if not kdactiv: kdactiv = maxiter
         loss_evo = []
 
         # ______________________________________
@@ -172,50 +173,55 @@ class mayo_estimator:
         L0, X0 = self.L0x0
 
         L0 = self.model.mask * torch.unsqueeze(torch.from_numpy(L0), 0).double()
-
-
         X0 = self.model.mask * torch.unsqueeze(torch.from_numpy(X0), 0).double()
 
         # ______________________________________
-        #  Optimizer definition  
+        #  Init variables and optimizer
 
         Lk, Xk = L0, X0
-        optimizer = optim.LBFGS([Lk, Xk])
         Lk.requires_grad = True; Xk.requires_grad = True
+        L_Ik = torch.ones(self.model.nb_frame - 1)
 
         # Model and loss at step 0
-        Y = self.model.forward_ADI(Lk, Xk)
+        Y = self.model.forward_ADI(Lk, Xk, L_Ik)
         loss = self.fun_loss(Y, science_data)
         R = w_r * self.regul(Xk)
 
+        # Definition of minimizer step.
         def closure():
             nonlocal R, loss
             optimizer.zero_grad()
             with torch.autograd.detect_anomaly():
-                Yk = self.model.forward_ADI(Lk, Xk)
-                R =  w_r * self.regul(Xk)
+                Yk = self.model.forward_ADI(Lk, Xk, L_Ik)
+                R = w_r * self.regul(Xk)
                 loss = self.fun_loss(Yk, science_data) + Ractiv * R
                 loss.backward()
             return loss
+
+        # If L_I is set to True, L variation intensity will be estimated
+        if estimI :
+            optimizer = optim.LBFGS([Lk, Xk, L_Ik])
+            L_Ik.requires_grad = True
+        else:
+            optimizer = optim.LBFGS([Lk, Xk])
 
         # ______________________________________
         #  Minimizations Start    
 
         start_time = datetime.now()
         print(sep + "\nResolving mayo optimization problem ..." +
-                    "\nMinimiz LBFGS with '"+str(self.config[1])+"' loss and '"+str(self.config[0])+"' regul\n" +
-                    "\nHypermarameter is set to {:.2f}".format(w_r)+", maxiter="+str(maxiter)+"\n")
-
+              "\nMinimiz LBFGS with '" + str(self.config[1]) + "' loss and '" + str(self.config[0]) + "' regul\n" +
+              "\nHypermarameter is set to {:.2f}".format(w_r) + ", maxiter=" + str(maxiter) + "\n")
 
         for k in range(maxiter):
             loss_evo.append(loss)
             if verbose: print("Iteration n°" + str(k) + " {:.6e}".format(loss) +
-                                "\n\tWith R = {:.4e} ({:.0f}%)".format(R, 100 * R / loss) +
-                                 "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss))
-            if gif: print_iter(Lk, Xk, k, loss, R, self.config, w_r, Ractiv)
+                              "\n\tWith R = {:.4e} ({:.0f}%)".format(R, 100 * R / loss) +
+                              "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss, 100 * (loss - R) / loss))
+            if gif: print_iter(Lk, Xk, k, loss, R, self.config, w_r, Ractiv, estimI, L_Ik, save)
 
-            if kactiv  and k > kactiv  : Ractiv = 1  # Only activate regul after few iterations
-            if kdactiv and k > kdactiv : Ractiv = 0  # Shut down regul after few iterations
+            if kactiv and k > kactiv: Ractiv = 1  # Only activate regul after few iterations
+            if kdactiv and k > kdactiv: Ractiv = 0  # Shut down regul after few iterations
 
             optimizer.step(closure)
 
@@ -224,20 +230,24 @@ class mayo_estimator:
         # ______________________________________
         # Done, Store and unwrap results back to numpy array!
 
-        L_est, X_est = abs(L0.detach().numpy()[0, :, :]), abs(X0.detach().numpy()[0, :, :])
+        L_est, X_est = abs(Lk.detach().numpy()[0, :, :]), abs(Xk.detach().numpy()[0, :, :])
+        L_I  = abs(L_Ik.detach().numpy())
 
         # Result dict
-        res = {'state': optimizer.state,
-               'x': (L_est, X_est),
+        res = {'state'   : optimizer.state,
+               'x'       : (L_est, X_est),
+               'L_i'     : L_I,
                'loss_evo': loss_evo}
 
         self.res = res
 
         # Save
-        if gif: iter_to_gif()
+        if gif: iter_to_gif(save)
         if save: write_fits(save + "/L_est.fits", L_est), write_fits(save + "/X_est.fits", X_est)
+        if save and estimI : write_fits(save + "/L_I.fits", L_I)
 
-        return L_est, X_est
+        if estimI : return L_est, X_est, L_I
+        else   : return L_est, X_est
 
     # _____________________________________________________________
     # _____________ Tools functions of mayo_estimator _____________
@@ -257,31 +267,5 @@ class mayo_estimator:
 
         return Xs_est
 
-    def constant_flux_repartition(self):
-        if not hasattr(self, 'res'): raise AssertionError("Estimation should be lunched first")
-        L_est, X_est = self.res['x']
-        rad_L = []; rad_X = []
-        rad_len = self.model.frame_shape[0]//2
-        for raduis in range(1,rad_len):
-
-            sel_point = np.linspace(np.pi /(4 * raduis), 2 * np.pi - np.pi /(4 * raduis), raduis * 4)
-
-            y = raduis * np.cos(sel_point); x = raduis * np.sin(sel_point)
-
-            y = np.rint(np.array([y[k]+0.5 if y[k]>0 else y[k]-0.5 for k in range(len(y))])).astype(int)
-            x = np.rint(np.array([x[k]+0.5 if x[k]>0 else x[k]-0.5 for k in range(len(x))])).astype(int)
-
-            y += rad_len; x += rad_len
-            rad_L.append(np.min(L_est[x, y]))
-            rad_X.append(np.min(X_est[x, y]))
-
-            # Change const raduis from L to X
-            X_est[x, y] += np.min(L_est[x, y])
-            L_est[x, y] -= np.min(L_est[x, y])
-
-        self.rad_L = rad_L; self.rad_X = rad_X
-
-        return L_est, X_est
-
     def get_science_data(self):
-        return self.model.rot_angles, self.model.phi_coro, self.const["science_data"]
+        return self.model.rot_angles, self.const["science_data"]

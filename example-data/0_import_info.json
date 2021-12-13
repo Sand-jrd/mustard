@@ -1,9 +1,5 @@
 
 {
     "cube"  : "4_final_cube_bin1_DistCorr_K1_256_norm",
-    "angles": "4_final_derot_angles_bin1_K1",
-    "psf"   : "4_final_psf_medK1_gauss_norm256",
-
-    "which_psf" : 1
-
+    "angles": "4_final_derot_angles_bin1_K1"
 }

@@ -136,3 +136,6 @@ dmypy.json
 .pyre/
 
 *.gif
+/iter
+/L0X0
+/example-data
