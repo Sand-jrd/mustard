@@ -85,10 +85,10 @@ def unpack_science_datadir(datadir):
     return angles, science_data
 
 
-def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r, Ractiv, estimL, L_I, datadir):
+def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config, w_r, Ractiv, estimL, flux, datadir):
     L_np  = L.detach().numpy()[0, :, :]
     X_np  = x.detach().numpy()[0, :, :]
-    L_Inp = L_I.detach().numpy()
+    fluxnp = flux.detach().numpy()
 
     plt.ioff()
     col = 3 if estimL else 2
@@ -101,7 +101,7 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r
 
     if not bfgs_iter : title = "Initialisation"
     else : title = "Estimation of L and X"
-    if estimL : title +=" and L_I"
+    if estimL : title +=" and flux"
     title += " at iteration n°" + str(bfgs_iter)
 
     plt.suptitle(title)
@@ -109,22 +109,26 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R, config, w_r
     plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) ")
     plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
 
-    infos = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
-            "\n w_r = {:.2f}".format(w_r)
+    infos  = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
+             "\n w_r = {:.2f}".format(w_r)
     infos += ", R is activated" if Ractiv else ", R is deactivated"
     infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
-            "\n   R = {:.4e} ({:.0f}%)".format(R, 100*R/(loss)) + "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R)/loss)
+             "\n   R = {:.4e} ({:.0f}%)".format(R1, 100*R1/(loss)) + \
+             "\n   R = {:.4e} ({:.0f}%)".format(R2, 100 * R2 / (loss)) + \
+             "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R1-R2)/loss)
 
     if estimL :
-        LIinfo = "I min : " + str(np.min(L_Inp)) + "\nI max : " + str(np.max(L_Inp))
+        LIinfo = "I min : " + str(np.min(fluxnp)) + "\nI max : " + str(np.max(fluxnp))
         estimBox = dict(boxstyle='square', facecolor='beige', edgecolor='indigo', alpha=0.65)
-        plt.subplot2grid((col,2), (1,0), colspan=2), plt.bar(range(2, len(L_Inp)+2), L_Inp-1, color='beige', edgecolor="black")
-        plt.xticks(range(1,len(L_Inp)+2))
+        plt.subplot2grid((col, 2), (1, 0), colspan=2)
+        plt.bar(range(2, len(fluxnp)+2), fluxnp-1, color='beige', edgecolor="black")
+        plt.xticks(range(1,len(fluxnp)+2))
         plt.text(0, 0, LIinfo, bbox=estimBox, fontdict={'color':'indigo'})
-        plt.title("L_I variations")
+        plt.title("flux variations")
         plt.ylabel("I factor diff"), plt.xlabel("frameID")
 
-    plt.subplot2grid((col,2), (2,0), colspan=2), plt.axis('off'), plt.text(0.3, -0.2, infos, bbox=BoxStyle, fontdict=FontStyle)
+    plt.subplot2grid((col,2), (2 if estimL else 1, 0), colspan=2)
+    plt.axis('off'), plt.text(0.3, -0.2, infos, bbox=BoxStyle, fontdict=FontStyle)
 
     if not datadir : datadir = "."
     if not isdir(datadir + "/iter/"): mkdir(datadir + "/iter/")
@@ -158,5 +162,3 @@ def iter_to_gif(save_gif, name="sim"):
                 "Can't delete saves for gif. A process might not have closed properly. "
                 "\nIgnore deletion \nI highly suggest you to delete it.")
         ii += 1
-    try: os.rmdir(save_gif + "/iter")
-    except PermissionError: print("Can't delete temporary iter/ directory.")

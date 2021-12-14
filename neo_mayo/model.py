@@ -59,10 +59,10 @@ class model_ADI:
         self.conv = lambda x, y, **kwargs: torch.abs(torch.fft.ifftshift(
             torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) * torch.fft.fftshift(torch.fft.fft2(y)))))
 
-    def forward_ADI(self, L, x, L_I=None):
+    def forward_ADI(self, L, x, flux=None):
         """ Process forward model  : Y =  ( l_i * L + R(x)) )  """
 
-        if L_I is None: L_I = torch.ones(self.nb_frame-1)
+        if flux is None: flux = torch.ones(self.nb_frame - 1)
 
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
@@ -72,6 +72,7 @@ class model_ADI:
 
         for frame_id in range(1,self.nb_frame):
             Rx = self.rot(x.abs(), float(self.rot_angles[frame_id]), **self.rot_args)
-            Y[frame_id] = L_I[frame_id-1] * L + Rx
+            Y[frame_id] =  L + Rx
+            Y[frame_id] *= flux[frame_id - 1]
 
         return Y

@@ -17,24 +17,26 @@ import torch
 
 # Choose where to get datas
 
-datadir = "./example-data/1100.C-0481D/K1"
+datadir = "./example-data/"
 
-Test_ini    = True
+Test_ini    = False
 Test_model  = False
 Test_regul  = False
 Test_mayo   = True
 i_have_time = False # Extra outputs
 
-regul_weight = 0.2
-kactiv  = 2
-kdactiv = None
-delta = 1e4
-maxiter = 13
+param = {'w_r' : 0.2,
+        'w_r2' : 0.2,
+        'kactiv' : 2,
+        'kdactiv' : None,
+        'estimI' : True,
+        'maxiter' : 13}
+
 
 # %% -------------------------------------
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, delta=delta, rot="fft", loss="mse", regul="smooth")
+estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth")
 shape = estimator.shape
 model = estimator.model
 angles, science_data = estimator.get_science_data()
@@ -58,11 +60,11 @@ else : L_ini, X_ini = estimator.initialisation(from_dir=datadir + "/L0X0")
 # %% -------------------------------------
 # Test Forward model
 
-def test_model(L_ini, X_ini, L_I=torch.ones(model.nb_frame-1)):
+def test_model(L_ini, X_ini, flux=torch.ones(model.nb_frame-1)):
     L_ini_tensor = torch.unsqueeze(torch.from_numpy(L_ini), 0)
     X_ini_tensor = torch.unsqueeze(torch.from_numpy(X_ini), 0)
 
-    Y_tensor = model.forward_ADI(L_ini_tensor, X_ini_tensor, L_I)
+    Y_tensor = model.forward_ADI(L_ini_tensor, X_ini_tensor, flux)
     Y = Y_tensor.detach().numpy()[:, 0, :, :]
     return Y, L_ini_tensor, X_ini_tensor
 
@@ -116,14 +118,8 @@ if Test_regul :
 
 if Test_mayo:
 
-    # L_est, X_est = estimator.estimate(w_r=regul_weight,
-    #                                   maxiter=maxiter,kactiv=kactiv,kdactiv=kdactiv,
-    #                                   save=False, gif=True, verbose=True)
-
-    L_est, X_est, L_I = estimator.estimate(w_r=regul_weight, estimI=True,
-                                            maxiter=maxiter, kactiv=kactiv, kdactiv=kdactiv,
-                                            save=datadir,
-                                            gif=True, verbose=True)
+    # L_est, X_est = estimator.estimate(**param,save=False, gif=True, verbose=True)
+    L_est, X_est, flux = estimator.estimate(**param, save=datadir, gif=True, verbose=True)
     
     # Complete results are stored in the estimator
     res = estimator.res 
@@ -135,8 +131,8 @@ if Test_mayo:
     ex_frame = 30
     args = {"cmap": "magma", "vmax": np.percentile(science_data[ex_frame], 98), "vmin": np.percentile(science_data[ex_frame], 0)}
 
-    Y_ini, L_t_ini, X_t_ini = test_model(L_ini, X_ini)
-    Y_est, L_t_est, X_t_est = test_model(L_est, X_est, L_I)
+    Y_ini, L_t_ini, X_t_ini = test_model(L_ini, X_ini, flux)
+    Y_est, L_t_est, X_t_est = test_model(L_est, X_est, flux)
 
     plt.subplot(2, 3, 1), plt.imshow(Y_ini[ex_frame], **args), plt.title("Y from ini, frame " + str(ex_frame))
     plt.subplot(2, 3, 2), plt.imshow(Y_est[ex_frame], **args), plt.title("Y from estimation, frame " + str(ex_frame))
