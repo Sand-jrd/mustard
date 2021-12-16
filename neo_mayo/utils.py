@@ -153,7 +153,7 @@ def iter_to_gif(save_gif, name="sim"):
                    loop=0)
 
     ii = 0
-    for file in sorted(glob.glob("./iter/*.png")):
+    for file in sorted(glob.glob(save_gif + "/iter/*.png")):
         images[ii].close()
         try:
             os.remove(file)
@@ -162,3 +162,4 @@ def iter_to_gif(save_gif, name="sim"):
                 "Can't delete saves for gif. A process might not have closed properly. "
                 "\nIgnore deletion \nI highly suggest you to delete it.")
         ii += 1
+    os.rmdir(save_gif + "/iter/")

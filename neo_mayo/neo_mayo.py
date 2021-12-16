@@ -52,10 +52,11 @@ class mayo_estimator:
 
     """
 
-    def __init__(self, datadir="./data", mask_size=15, rot="fft", loss="mse",regul="smooth", epsi=1e-3):
+    def __init__(self, datadir="./data", mask_size=15, rot="fft", loss="mse",regul="smooth",Gframes=None, epsi=1e-3):
 
         # -- Create model and define constants --
         angles, science_data = unpack_science_datadir(datadir)
+        if Gframes is not None: science_data = science_data[Gframes]; angles = angles[Gframes]
 
         self.shape = science_data[0].shape
         self.nb_frames = science_data.shape[0]
@@ -193,7 +194,7 @@ class mayo_estimator:
                 Yk = self.model.forward_ADI(Lk, Xk, flux_k)
                 R1 = w_r * self.regul(Xk)
                 R2 = w_r2 * self.regul2(Xk,Lk,self.model.mask)
-                loss = self.fun_loss(Yk, science_data) + Ractiv * R1 + R2
+                loss = self.fun_loss(Yk, science_data) + Ractiv * (R1 + R2)
                 loss.backward()
             return loss
 

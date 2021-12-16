@@ -18,7 +18,7 @@ import torch
 # Choose where to get datas
 
 datadir = "./example-data/"
-
+datadir = "../PDS70-neomayo/1100.C-0481M/K2/"
 Test_ini    = False
 Test_model  = False
 Test_regul  = False
@@ -36,7 +36,7 @@ param = {'w_r' : 0.2,
 # %% -------------------------------------
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth")
+estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Gframes= list(range(17,29)) + list(range(40,49)))
 shape = estimator.shape
 model = estimator.model
 angles, science_data = estimator.get_science_data()
@@ -128,7 +128,7 @@ if Test_mayo:
     # Show results
 
     plt.figure("Loss evolutions : ")
-    ex_frame = 30
+    ex_frame = 5
     args = {"cmap": "magma", "vmax": np.percentile(science_data[ex_frame], 98), "vmin": np.percentile(science_data[ex_frame], 0)}
 
     Y_ini, L_t_ini, X_t_ini = test_model(L_ini, X_ini, flux)
