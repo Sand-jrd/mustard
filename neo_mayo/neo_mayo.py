@@ -28,6 +28,8 @@ import numpy as np
 # Loss functions
 from torch.nn import MSELoss
 import torch.optim as optim
+from torch import sum as tsum
+from torch import sqrt as tsqrt
 
 # Other
 from neo_mayo.utils import circle, iter_to_gif, print_iter
@@ -78,7 +80,7 @@ class mayo_estimator:
         elif regul == "l1":
             self.regul = lambda X: torch.sum(torch.abs(X))
 
-        self.regul2 =  lambda X,L,M:  (torch.sum((M * X)**2) + torch.sum(((1-M) * L)**2))
+        self.regul2 =  lambda X,L,M:  0
 
         self.config = regul, loss
 
@@ -125,6 +127,60 @@ class mayo_estimator:
         self.L0x0 = (L0, X0)
 
         return L0, X0
+
+    def configR2(self, M, mode = "mask", penaliz = "X", invert=False ):
+        """ Configuration for Second regularization.
+        Two possible mode : Format R = norm(M*X) (mode mask)
+                                or R = dist(M-X) (mode dist)
+
+        Parameters
+        ----------
+        M : numpy.array or torch.tensor
+        Prior mask of X.
+
+        mode : {"mask","dist"}.
+        if "mask" :  R = norm(M*X)
+            if M will be normalize to have values from 0 to 1.
+        if "dist" :  R = dist(M-X)
+
+        penaliz : {"X","L","both"}
+        Unknown to penaliz.
+        With mode mask :
+            if "X" : R = norm(M*X)
+            if "L" : R = norm((1-M)*X)
+        With mode dist :
+            if "X" : R = dist(M-X)
+            if "L" : L = -dist(M-L)
+        If "both" : will do both
+
+        invert : Bool
+        Reverse penalize mode bewteen L and X.
+
+        Returns
+        -------
+
+        """
+        if isinstance(M, np.ndarray) : M = torch.from_numpy(M)
+        if not (isinstance(M, torch.Tensor) and M.shape==self.model.frame_shape) :
+            raise TypeError("Mask M should be tensor or arry of size " + str(self.model.frame_shape))
+        N = self.model.frame_shape[0] ** 2
+        if mode == "dist":
+            self.mask = M
+            sign = -1/N if invert else 1/N
+            if   penaliz == "X"   :  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2))
+            elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2))
+            elif penaliz == "both":  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2)) - sign * tsqrt(tsum((M - L) ** 2))
+            else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
+
+        elif mode == "mask":
+            M = M/torch.max(M) # Normalize mask
+            self.mask = (1-M)/N if invert else M/N
+            if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2))
+            elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsqrt(tsum(((1 - M) * L) ** 2))
+            elif penaliz == "both": self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2)) + tsqrt(tsum(((1 - M) * L) ** 2))
+            else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
+
+        else : raise Exception("Unknown value of mode. Possible values are 'mask' or 'dist'")
 
     def estimate(self, w_r=0, w_r2=0, maxiter=10, kactiv=0, kdactiv=None, estimI=False, save=False, gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
@@ -192,8 +248,8 @@ class mayo_estimator:
             optimizer.zero_grad()
             with torch.autograd.detect_anomaly():
                 Yk = self.model.forward_ADI(Lk, Xk, flux_k)
-                R1 = w_r * self.regul(Xk)
-                R2 = w_r2 * self.regul2(Xk,Lk,self.model.mask)
+                R1 = w_r * self.regul(Xk) if w_r else 0
+                R2 = w_r2 * self.regul2(Xk,Lk,self.mask) if w_r2 else 0
                 loss = self.fun_loss(Yk, science_data) + Ractiv * (R1 + R2)
                 loss.backward()
             return loss

@@ -9,7 +9,12 @@ Tests of neo-mayo
 """
 import matplotlib.pyplot as plt
 from neo_mayo import mayo_estimator
+from neo_mayo.utils import ellipse,circle
+from vip_hci.fits import open_fits
+from vip_hci.var import frame_filter_lowpass
+from vip_hci.preproc import frame_rotate
 import numpy as np
+import glob
 import torch
 
 # %% -------------------------------------
@@ -18,28 +23,61 @@ import torch
 # Choose where to get datas
 
 datadir = "./example-data/"
-datadir = "../PDS70-neomayo/1100.C-0481M/K2/"
+#datadir = "../PDS70-neomayo/095.C-0298A/H2/"
+
 Test_ini    = False
 Test_model  = False
 Test_regul  = False
-Test_mayo   = True
+Test_mayo   = False
 i_have_time = False # Extra outputs
+show_mask   = True
 
-param = {'w_r' : 0.2,
-        'w_r2' : 0.2,
-        'kactiv' : 2,
-        'kdactiv' : None,
+param = {'w_r'   : 0.2,
+        'w_r2'   : 0.2,
+        'kactiv' : None,
+        'kdactiv': None,
         'estimI' : True,
-        'maxiter' : 13}
-
-
-# %% -------------------------------------
+        'maxiter': 30}
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Gframes= list(range(17,29)) + list(range(40,49)))
+estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Gframes= list(range(1,19)))
 shape = estimator.shape
 model = estimator.model
 angles, science_data = estimator.get_science_data()
+# %% -------------------------------------
+
+# init R2 regularization (optional)
+M =  open_fits("/Users/sand-jrd/Desktop/DPI/denoise/1100.C-0481T_1.fits").clip(0)
+mid = M.shape[0]//2; size = model.frame_shape[0]//2;
+# M = M[mid-size:mid+size,mid-size:mid+size]                            # if frame too big
+M0 = np.zeros(model.frame_shape); M0[size-mid:size+mid,size-mid:size+mid]=M;M=M0   # if frame too small
+M = np.max(science_data[0]) * M/np.max(M)
+# M = ellipse(model.frame_shape,60, 40, 5) \
+   # - circle(model.frame_shape,10)
+R2_param = { 'M'    : M,
+           'mode'   : "dist",
+           'penaliz': "X",
+           'invert' : True }
+
+estimator.configR2(**R2_param)
+
+if show_mask :
+    exFrame = frame_rotate(science_data[0], -angles[0])
+    exFrame = open_fits(datadir + "/X_est.fits")
+    args = {"cmap": "magma", "vmax": np.percentile(science_data[0], 98)}
+
+
+    plt.figure("the mask")
+    plt.subplot(131),plt.imshow(M,**args),plt.title("Mask")
+    plt.subplot(132),plt.imshow(exFrame,**args),plt.title("X")
+    if R2_param['mode'] == "mask": plt.subplot(133),plt.imshow(np.abs(M*exFrame),**args),plt.title("Mask * X")
+    if R2_param['mode'] == "dist": plt.subplot(133),plt.imshow(np.abs(M-exFrame),**args),plt.title("Mask - X")
+
+
+
+
+
+# %% -------------------------------------
 
 # %% Test Greed
 
@@ -94,9 +132,6 @@ if Test_model:
 
 # %% -------------------------------------
 # Test Estimations
-
-from vip_hci.var import frame_filter_lowpass
-from vip_hci.preproc import frame_rotate
 
 
 if Test_regul :

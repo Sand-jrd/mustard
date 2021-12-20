@@ -26,6 +26,8 @@ from datetime import datetime
 
 BoxStyle = dict(boxstyle='square', pad=1.3, mutation_scale=0.01, facecolor='indigo', alpha=0.65)
 FontStyle = dict(family= 'sans', color= 'beige', weight='normal', size= 12)
+estimBox = dict(boxstyle='square', facecolor='beige', edgecolor='indigo', alpha=0.65)
+
 
 # %% Create patterns
 
@@ -55,6 +57,50 @@ def circle(shape, r, offset=0.5):
         for y in range(0, l):
             if pow(x - (w / 2) + offset, 2) + pow(y - (l / 2) + offset, 2) < pow(r, 2):
                 M[x, y] = 1
+    return M
+
+
+def ellipse(shape,small_ax, big_ax, rotation, off_center=[0, 0]):
+    """ Create ellipse of 1 in a 2D matrix of zeros"
+
+       Parameters
+       ----------
+       shape : tuple
+           shape x,y of the matrix
+
+       small_ax : float
+            radius of small ax of the ellipse
+
+       big_ax : float
+            radius of small ax of the big_ax
+
+        rotation : float
+            rotation of the ellipse
+
+        off_center : list or tuple of 2 float
+            shift x,y of the center of the ellipse
+
+       Returns
+       -------
+       M : ndarray
+           Zeros matrix with a circle filled with ones
+        """
+
+    mid =  np.array(shape) // 2 - off_center
+    M = np.zeros(shape)
+    w, l = shape
+
+    def isInEllipse(x,y):
+        term1 = (x - mid[0])*np.cos(rotation) +  (y - mid[1])*np.sin(rotation)
+        term2 = (x - mid[0])*np.sin(rotation) - (y - mid[1])*np.cos(rotation)
+        return (term1 / small_ax)**2 + (term2 / big_ax)**2  <= 1
+
+    # Generate elips coordinate trace points
+    for x in range(shape[0]):
+        for y in range(shape[1]):
+            if isInEllipse(x, y):
+                M[x, y] = 1
+
     return M
 
 
@@ -113,28 +159,27 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
              "\n w_r = {:.2f}".format(w_r)
     infos += ", R is activated" if Ractiv else ", R is deactivated"
     infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
-             "\n   R = {:.4e} ({:.0f}%)".format(R1, 100*R1/(loss)) + \
-             "\n   R = {:.4e} ({:.0f}%)".format(R2, 100 * R2 / (loss)) + \
-             "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100*(loss-R1-R2)/loss)
+             "\n   R = {:.4e} ({:.0f}%)".format(R1, 100 * R1 / loss) + \
+             "\n   R = {:.4e} ({:.0f}%)".format(R2, 100 * R2 / loss) + \
+             "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100 * (loss-R1-R2) / loss )
 
     if estimL :
-        LIinfo = "I min : " + str(np.min(fluxnp)) + "\nI max : " + str(np.max(fluxnp))
-        estimBox = dict(boxstyle='square', facecolor='beige', edgecolor='indigo', alpha=0.65)
+
         plt.subplot2grid((col, 2), (1, 0), colspan=2)
-        plt.bar(range(2, len(fluxnp)+2), fluxnp-1, color='beige', edgecolor="black")
-        plt.xticks(range(1,len(fluxnp)+2))
+        plt.bar(range(2, len(fluxnp)+2), fluxnp-1, color='beige', edgecolor="black"),plt.xticks(range(1,len(fluxnp)+2))
+        plt.ylabel("I factor diff"), plt.xlabel("frameID"),plt.title("flux variations")
+
+        LIinfo = "I min : " + str(np.min(fluxnp)) + "\nI max : " + str(np.max(fluxnp))
         plt.text(0, 0, LIinfo, bbox=estimBox, fontdict={'color':'indigo'})
-        plt.title("flux variations")
-        plt.ylabel("I factor diff"), plt.xlabel("frameID")
 
     plt.subplot2grid((col,2), (2 if estimL else 1, 0), colspan=2)
     plt.axis('off'), plt.text(0.3, -0.2, infos, bbox=BoxStyle, fontdict=FontStyle)
 
     if not datadir : datadir = "."
     if not isdir(datadir + "/iter/"): mkdir(datadir + "/iter/")
+
     plt.savefig(datadir + "/iter/" + str(bfgs_iter) + ".png", pad_inches=0.5)
-    plt.clf()
-    plt.close()
+    plt.clf(), plt.close()
 
 
 def iter_to_gif(save_gif, name="sim"):
