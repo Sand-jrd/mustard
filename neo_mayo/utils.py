@@ -89,6 +89,7 @@ def ellipse(shape,small_ax, big_ax, rotation, off_center=[0, 0]):
     mid =  np.array(shape) // 2 - off_center
     M = np.zeros(shape)
     w, l = shape
+    rotation = np.deg2rad(rotation)
 
     def isInEllipse(x,y):
         term1 = (x - mid[0])*np.cos(rotation) +  (y - mid[1])*np.sin(rotation)
