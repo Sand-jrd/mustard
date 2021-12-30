@@ -49,8 +49,8 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
         res = pca_fullfr.pca(cube, angle_list, ncomp=ncomp_step, verbose=False)
 
         for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
+            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
+            L_k[frame_id] = cube_der_rot - res.clip(min=0)
 
     else:
         print("Mode pca iterative")
@@ -61,8 +61,8 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
                      verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
+            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
+            L_k[frame_id] = cube_der_rot - res.clip(min=0)
 
     return np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
 

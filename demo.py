@@ -23,59 +23,41 @@ import torch
 # Choose where to get datas
 
 datadir = "./example-data/"
-#datadir = "../PDS70-neomayo/095.C-0298A/H2/"
+datadir = "../PDS70-neomayo/1100.C-0481M/K1/"
 
-Test_ini    = False
+Test_ini    = True
 Test_model  = False
 Test_regul  = False
-Test_mayo   = False
+Test_mayo   = True
 i_have_time = False # Extra outputs
-show_mask   = True
+show_mask   = False
 
-param = {'w_r'   : 0.2,
-        'w_r2'   : 0.2,
+param = {'w_r'   : 0.4,
+        'w_r2'   : 100,
         'kactiv' : None,
         'kdactiv': None,
         'estimI' : True,
-        'maxiter': 30}
+        'maxiter': 20}
+
+Badframes = (11)
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Gframes= list(range(1,19)))
+estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
 shape = estimator.shape
 model = estimator.model
 angles, science_data = estimator.get_science_data()
 # %% -------------------------------------
 
 # init R2 regularization (optional)
-M =  open_fits("/Users/sand-jrd/Desktop/DPI/denoise/1100.C-0481T_1.fits").clip(0)
-mid = M.shape[0]//2; size = model.frame_shape[0]//2;
-# M = M[mid-size:mid+size,mid-size:mid+size]                            # if frame too big
-M0 = np.zeros(model.frame_shape); M0[size-mid:size+mid,size-mid:size+mid]=M;M=M0   # if frame too small
-M = np.max(science_data[0]) * M/np.max(M)
-# M = ellipse(model.frame_shape,60, 40, 5) \
-   # - circle(model.frame_shape,10)
+M = ellipse(model.frame_shape,85, 50, 13) \
+    - circle(model.frame_shape,25)
+
 R2_param = { 'M'    : M,
-           'mode'   : "dist",
-           'penaliz': "X",
+           'mode'   : "mask",
+           'penaliz': "both",
            'invert' : True }
 
 estimator.configR2(**R2_param)
-
-if show_mask :
-    exFrame = frame_rotate(science_data[0], -angles[0])
-    exFrame = open_fits(datadir + "/X_est.fits")
-    args = {"cmap": "magma", "vmax": np.percentile(science_data[0], 98)}
-
-
-    plt.figure("the mask")
-    plt.subplot(131),plt.imshow(M,**args),plt.title("Mask")
-    plt.subplot(132),plt.imshow(exFrame,**args),plt.title("X")
-    if R2_param['mode'] == "mask": plt.subplot(133),plt.imshow(np.abs(M*exFrame),**args),plt.title("Mask * X")
-    if R2_param['mode'] == "dist": plt.subplot(133),plt.imshow(np.abs(M-exFrame),**args),plt.title("Mask - X")
-
-
-
-
 
 # %% -------------------------------------
 
@@ -184,6 +166,20 @@ if Test_mayo:
     plt.subplot(3, 2, 4), plt.imshow(L_ini, **args), plt.title("L with iterative PCA ")
     plt.subplot(3, 1, 3), plt.imshow(science_data[ex_frame], **args), plt.title("Science data")
     plt.savefig(datadir + ".png", pad_inches=0.5)
+
+
+if show_mask :
+    args = {"cmap": "magma", "vmax": np.percentile(science_data[0], 98)}
+
+    plt.figure("the mask")
+    if R2_param["invert"] : M = (1-M)
+    plt.subplot(231),plt.imshow(M,**args),plt.title("Mask")
+    plt.subplot(232),plt.imshow(L_est,**args),plt.title("L")
+    plt.subplot(233),plt.imshow(X_est,**args),plt.title("X")
+    plt.subplot(235),plt.imshow((1-M)*L_est,**args),plt.title("(1-Mask) * L")
+    plt.subplot(236),plt.imshow(M*X_est,**args),plt.title("Mask * X")
+
+
 
 if i_have_time :
 

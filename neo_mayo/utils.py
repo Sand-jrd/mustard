@@ -51,12 +51,19 @@ def circle(shape, r, offset=0.5):
            Zeros matrix with a circle filled with ones
        
     """
+    assert(len(shape)==2 or len(shape)==3)
+    nb_f  = shape[0]  if len(shape) == 3 else 0
+    shape = shape[1:] if len(shape) == 3 else shape
+
     M = np.zeros(shape)
     w, l = shape
     for x in range(0, w):
         for y in range(0, l):
             if pow(x - (w / 2) + offset, 2) + pow(y - (l / 2) + offset, 2) < pow(r, 2):
                 M[x, y] = 1
+
+    if nb_f: M = np.tile(M, (nb_f, 1, 1))
+
     return M
 
 
@@ -86,6 +93,9 @@ def ellipse(shape,small_ax, big_ax, rotation, off_center=[0, 0]):
            Zeros matrix with a circle filled with ones
         """
 
+    nb_f  = shape[0]  if len(shape) == 3 else 0
+    shape = shape[1:] if len(shape) == 3 else shape
+
     mid =  np.array(shape) // 2 - off_center
     M = np.zeros(shape)
     w, l = shape
@@ -101,6 +111,8 @@ def ellipse(shape,small_ax, big_ax, rotation, off_center=[0, 0]):
         for y in range(shape[1]):
             if isInEllipse(x, y):
                 M[x, y] = 1
+
+    if nb_f : M = np.tile(M, (nb_f, 1, 1))
 
     return M
 
@@ -132,7 +144,7 @@ def unpack_science_datadir(datadir):
     return angles, science_data
 
 
-def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config, w_r, Ractiv, estimL, flux, datadir):
+def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config, w_r, w_r2, Ractiv, estimL, flux, datadir):
     L_np  = L.detach().numpy()[0, :, :]
     X_np  = x.detach().numpy()[0, :, :]
     fluxnp = flux.detach().numpy()
@@ -157,12 +169,12 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
     plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
 
     infos  = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
-             "\n w_r = {:.2f}".format(w_r)
+             "\n w_r = {:.2f}".format(w_r) + "w_r = {:.2f}".format(w_r2)
     infos += ", R is activated" if Ractiv else ", R is deactivated"
     infos += "\n\nIteration n°" + str(bfgs_iter) + " - loss = {:.6e}".format(loss) +\
-             "\n   R = {:.4e} ({:.0f}%)".format(R1, 100 * R1 / loss) + \
-             "\n   R = {:.4e} ({:.0f}%)".format(R2, 100 * R2 / loss) + \
-             "\n    J = {:.4e} ({:.0f}%) \n".format(loss, 100 * (loss-R1-R2) / loss )
+             "\n   R1 = {:.4e} ({:.0f}%)".format(R1, 100 * Ractiv * R1 / loss) + \
+             "\n   R2 = {:.4e} ({:.0f}%)".format(R2, 100 * Ractiv * R2 / loss) + \
+             "\n    J = {:.4e} ({:.0f}%) \n".format(loss - Ractiv * (R1 + R2), 100 * (loss- Ractiv*(R1+R2)) / loss )
 
     if estimL :
 

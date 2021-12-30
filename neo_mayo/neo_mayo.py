@@ -54,11 +54,14 @@ class mayo_estimator:
 
     """
 
-    def __init__(self, datadir="./data", mask_size=15, rot="fft", loss="mse",regul="smooth",Gframes=None, epsi=1e-3):
+    def __init__(self, datadir="./data", mask_size=15, rot="fft", loss="mse",
+                 regul="smooth", Badframes=None, epsi=1e-3):
 
         # -- Create model and define constants --
         angles, science_data = unpack_science_datadir(datadir)
-        if Gframes is not None: science_data = science_data[Gframes]; angles = angles[Gframes]
+        if Badframes is not None:
+            science_data = np.delete(science_data, Badframes, 0)
+            angles = np.delete(angles, Badframes, 0)
 
         self.shape = science_data[0].shape
         self.nb_frames = science_data.shape[0]
@@ -130,8 +133,8 @@ class mayo_estimator:
 
     def configR2(self, M, mode = "mask", penaliz = "X", invert=False ):
         """ Configuration for Second regularization.
-        Two possible mode : Format R = norm(M*X) (mode mask)
-                                or R = dist(M-X) (mode dist)
+        Two possible mode :   R = M*X)      (mode mask)
+                           or R = dist(M-X) (mode dist)
 
         Parameters
         ----------
@@ -147,7 +150,7 @@ class mayo_estimator:
         Unknown to penaliz.
         With mode mask :
             if "X" : R = norm(M*X)
-            if "L" : R = norm((1-M)*X)
+            if "L" : R = norm((1-M)*L)
         With mode dist :
             if "X" : R = dist(M-X)
             if "L" : L = -dist(M-L)
@@ -162,8 +165,10 @@ class mayo_estimator:
         """
         if isinstance(M, np.ndarray) : M = torch.from_numpy(M)
         if not (isinstance(M, torch.Tensor) and M.shape==self.model.frame_shape) :
-            raise TypeError("Mask M should be tensor or arry of size " + str(self.model.frame_shape))
+            raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
+
         N = self.model.frame_shape[0] ** 2
+
         if mode == "dist":
             self.mask = M
             sign = -1/N if invert else 1/N
@@ -177,12 +182,12 @@ class mayo_estimator:
             self.mask = (1-M)/N if invert else M/N
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2))
             elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsqrt(tsum(((1 - M) * L) ** 2))
-            elif penaliz == "both": self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2)) + tsqrt(tsum(((1 - M) * L) ** 2))
+            elif penaliz == "both": self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2)) + tsqrt(tsum(((1 - M) * L) ** 2)) // 2
             else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
 
         else : raise Exception("Unknown value of mode. Possible values are 'mask' or 'dist'")
 
-    def estimate(self, w_r=0, w_r2=0, maxiter=10, kactiv=0, kdactiv=None, estimI=False, save=False, gif=False, verbose=False):
+    def estimate(self, w_r=0, w_r2=0, maxiter=10, kactiv=0, kdactiv=None, estimI=False, save=False, suffix = "", gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
             The first step with greed aim to find a good initialisation 
             The second step process to the minimization
@@ -272,10 +277,10 @@ class mayo_estimator:
         for k in range(maxiter):
             loss_evo.append(loss)
             if verbose: print("Iteration n°" + str(k) + " {:.6e}".format(loss) +
-                              "\n\tWith R1 = {:.4e} ({:.0f}%)".format(R1, 100 * R1 / loss) +
-                              "\n\tWith R2 = {:.4e} ({:.0f}%)".format(R2, 100 * R2 / loss) +
-                              "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss, 100 * (loss - R1 - R2) / loss))
-            if gif: print_iter(Lk, Xk, k, loss, R1, R2, self.config, w_r, Ractiv, estimI, flux_k, save)
+                              "\n\tWith R1 = {:.4e} ({:.0f}%)".format(R1, 100 * Ractiv * R1 / loss) +
+                              "\n\tWith R2 = {:.4e} ({:.0f}%)".format(R2, 100 * Ractiv * R2 / loss) +
+                              "\n\tand loss = {:.4e} ({:.0f}%) \n".format(loss - Ractiv * (R1 + R2), 100 * (loss - Ractiv * (R1 + R2)) / loss))
+            if gif: print_iter(Lk, Xk, k, loss, R1, R2, self.config, w_r, w_r2, Ractiv, estimI, flux_k, save)
 
             if kactiv and k > kactiv: Ractiv = 1  # Only activate regul after few iterations
             if kdactiv and k > kdactiv: Ractiv = 0  # Shut down regul after few iterations
@@ -299,9 +304,9 @@ class mayo_estimator:
         self.res = res
 
         # Save
-        if gif: iter_to_gif(save)
-        if save: write_fits(save + "/L_est.fits", L_est), write_fits(save + "/X_est.fits", X_est)
-        if save and estimI : write_fits(save + "/flux.fits", flux)
+        if gif: iter_to_gif(save, suffix)
+        if save: write_fits(save + "/L_est"+suffix, L_est), write_fits(save + "/X_est"+suffix, X_est)
+        if save and estimI : write_fits(save + "/flux"+suffix, flux)
 
         if estimI : return L_est, X_est, flux
         else   : return L_est, X_est
