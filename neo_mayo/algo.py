@@ -101,12 +101,18 @@ def laplacian_tensor_conv(tensor, kernel_size=3):
     return filtered
 
 
-def sobel_tensor_conv(tensor):
+def sobel_tensor_conv(tensor,axis="y"):
     """ Apply sovel filter on input tensor X"""
 
-    kernel = np.array([[[1, 0, -1],
-                             [2, 0, -2],
-                             [1, 0, -1]]], dtype='float64')
+    if axis == "y":
+        kernel = np.array([[[1, 0, -1],
+                                 [2, 0, -2],
+                                 [1, 0, -1]]], dtype='float64')
+    elif axis == "x":
+        kernel = np.array([[[1, 2, 1],
+                            [0, 0, 0],
+                            [-1, -2, -1]]], dtype='float64')
+    else : raise ValueError("'Axis' parameters should be 'x' or 'y', not"+str(axis))
 
     kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
 

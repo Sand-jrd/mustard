@@ -23,23 +23,24 @@ import torch
 # Choose where to get datas
 
 datadir = "./example-data/"
-datadir = "../PDS70-neomayo/1100.C-0481M/K1/"
+datadir = "../PDS70-neomayo/095.C-0298B/H2/"
 
-Test_ini    = True
+Test_ini    = False
 Test_model  = False
 Test_regul  = False
 Test_mayo   = True
 i_have_time = False # Extra outputs
-show_mask   = False
+show_mask   = True
 
-param = {'w_r'   : 0.4,
-        'w_r2'   : 100,
-        'kactiv' : None,
-        'kdactiv': None,
+param = {'w_r'   : 0.01,
+        'w_r2'   : 0.10,
+        'gtol'   : 1e-10,
+        'kactiv' : 3,
+        'kdactiv': 20,
         'estimI' : True,
-        'maxiter': 20}
+        'maxiter': 70}
 
-Badframes = (11)
+Badframes = (0, 23, 38)
 
 # init the estimator and set variable
 estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
@@ -49,13 +50,14 @@ angles, science_data = estimator.get_science_data()
 # %% -------------------------------------
 
 # init R2 regularization (optional)
-M = ellipse(model.frame_shape,85, 50, 13) \
-    - circle(model.frame_shape,25)
+M = ellipse(model.frame_shape, 85, 50, 13) \
+    - circle(model.frame_shape, 25)
+M = circle(model.frame_shape, 60)
 
-R2_param = { 'M'    : M,
+R2_param = { 'Msk'    : M,
            'mode'   : "mask",
            'penaliz': "both",
-           'invert' : True }
+           'invert' : False }
 
 estimator.configR2(**R2_param)
 

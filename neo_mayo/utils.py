@@ -165,8 +165,8 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
 
     plt.suptitle(title)
 
-    plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) ")
-    plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)")
+    plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) "), plt.colorbar()
+    plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)"), plt.colorbar()
 
     infos  = "\nMinimiz LBFGS with '"+str(config[1])+"' loss and '"+str(config[0])+"' regul" +\
              "\n w_r = {:.2f}".format(w_r) + "w_r = {:.2f}".format(w_r2)
@@ -195,7 +195,7 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
     plt.clf(), plt.close()
 
 
-def iter_to_gif(save_gif, name="sim"):
+def iter_to_gif(save_gif, suffix=""):
     images = []
     plt.ion()
 
@@ -207,7 +207,7 @@ def iter_to_gif(save_gif, name="sim"):
         images.append(Image.open(file))
         if double_init : images.append(Image.open(file)); double_init = False
 
-    images[0].save(fp=save_gif + "/" + str(name) + date.strftime("_%d%b%H%M") +".gif", format='GIF', append_images=images, save_all=True, duration=500,
+    images[0].save(fp=save_gif + "/sim_" + str(suffix) + date.strftime("_%d%b%H%M") +".gif", format='GIF', append_images=images, save_all=True, duration=500,
                    loop=0)
 
     ii = 0
@@ -220,4 +220,6 @@ def iter_to_gif(save_gif, name="sim"):
                 "Can't delete saves for gif. A process might not have closed properly. "
                 "\nIgnore deletion \nI highly suggest you to delete it.")
         ii += 1
-    os.rmdir(save_gif + "/iter/")
+
+    try: os.rmdir(save_gif + "/iter/")
+    except: print("Failed to remove iter dir")
