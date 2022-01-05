@@ -98,7 +98,6 @@ def ellipse(shape,small_ax, big_ax, rotation, off_center=[0, 0]):
 
     mid =  np.array(shape) // 2 - off_center
     M = np.zeros(shape)
-    w, l = shape
     rotation = np.deg2rad(rotation)
 
     def isInEllipse(x,y):
@@ -156,7 +155,7 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
     plt.subplots(col, 2, figsize=(16, 9), gridspec_kw={'height_ratios': ratios})
 
     plt.suptitle("Iteration n°" + str(bfgs_iter) + "\nLoss  = {:.6e}".format(loss))
-    args = {"cmap": "magma", "vmax": np.percentile(L_np, 98), "vmin": np.percentile(L_np, 0)}
+    args = {"cmap": "magma", "vmax": np.percentile(L_np, 99.9), "vmin": np.percentile(X_np, 0)}
 
     if not bfgs_iter : title = "Initialisation"
     else : title = "Estimation of L and X"
@@ -195,12 +194,12 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
     plt.clf(), plt.close()
 
 
-def iter_to_gif(save_gif, suffix=None):
+def iter_to_gif(save_gif='./', suffix=None):
     images = []
     plt.ion()
 
     date = datetime.now()
-    if not save_gif: save_gif = "."
+    if not save_gif: save_gif = "./"
     suffix = '' if not suffix else suffix + '_'
 
     double_init = True
@@ -219,7 +218,7 @@ def iter_to_gif(save_gif, suffix=None):
         except PermissionError:
             print(
                 "Can't delete saves for gif. A process might not have closed properly. "
-                "\nIgnore deletion \nI highly suggest you to delete it.")
+                "\nIgnore deletion")
         ii += 1
 
     try: os.rmdir(save_gif + "/iter/")

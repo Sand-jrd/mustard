@@ -66,7 +66,7 @@ class mayo_estimator:
 
     """
 
-    def __init__(self, datadir="./data", coro=8, rot="fft", loss="mse",
+    def __init__(self, datadir="./data", coro=6, rot="fft", loss="mse",
                  regul="smooth", Badframes=None, epsi=1e-3):
 
         # -- Create model and define constants --
@@ -186,6 +186,7 @@ class mayo_estimator:
         if not (isinstance(Msk, torch.Tensor) and Msk.shape==self.model.frame_shape):
             raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
 
+        penaliz = penaliz.capitalize()
         rM = self.coroR # corono mask for regul
 
         if mode == "dist":
@@ -193,7 +194,7 @@ class mayo_estimator:
             sign = -1 if invert else 1
             if   penaliz == "X"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
             elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
-            elif penaliz == "both":  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2) -\
+            elif penaliz in ("Both", "B"):  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2) -\
                                                                    sign * -tsum( rM * (M - L) ** 2)
             else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
 
@@ -202,7 +203,7 @@ class mayo_estimator:
             self.mask = (1-Msk) if invert else Msk
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2)
             elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum( rM * ((1 - M) * L) ** 2)
-            elif penaliz == "both": self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2) + \
+            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2) + \
                                                                   tsum(M)**2/tsum((1 - M))**2 *\
                                                                   tsum( rM * ((1 - M) * L) ** 2)
 
@@ -210,7 +211,7 @@ class mayo_estimator:
 
         else: raise Exception("Unknown value of mode. Possible values are 'mask' or 'dist'")
 
-    def estimate(self, w_r=0.01, w_r2=0.20, w_pcent=True, estimI=False, maxiter=10,
+    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, maxiter=10,
                  gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
         """ Resole the minimization problem as describe in mayo
             The first step with greed aim to find a good initialisation 
@@ -405,6 +406,8 @@ class mayo_estimator:
 
         # Save
         if gif : iter_to_gif(save, suffix)
+
+        suffix = '' if not suffix else '_' + suffix
         if save: write_fits(save + "/L_est"+suffix, L_est), write_fits(save + "/X_est"+suffix, X_est)
         if save and estimI : write_fits(save + "/flux"+suffix, flux)
 
