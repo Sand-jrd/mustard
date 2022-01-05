@@ -22,7 +22,7 @@ import torch
 
 # Choose where to get datas
 
-datadir = "./example-data/"
+# datadir = "./example-data/"
 datadir = "../PDS70-neomayo/095.C-0298B/H2/"
 
 Test_ini    = False
@@ -33,14 +33,16 @@ i_have_time = False # Extra outputs
 show_mask   = True
 
 param = {'w_r'   : 0.01,
-        'w_r2'   : 0.10,
+        'w_r2'   : 0.05,
         'gtol'   : 1e-10,
         'kactiv' : 3,
         'kdactiv': 20,
         'estimI' : True,
-        'maxiter': 70}
+        'suffix' : None,
+        'maxiter': 35}
 
 Badframes = (0, 23, 38)
+Badframes = None
 
 # init the estimator and set variable
 estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
@@ -66,6 +68,7 @@ estimator.configR2(**R2_param)
 # %% Test Greed
 
 if Test_ini:
+
     L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", mode="pca", max_comp=1, nb_iter=10)
 
     # ___________________
@@ -175,11 +178,11 @@ if show_mask :
 
     plt.figure("the mask")
     if R2_param["invert"] : M = (1-M)
-    plt.subplot(231),plt.imshow(M,**args),plt.title("Mask")
-    plt.subplot(232),plt.imshow(L_est,**args),plt.title("L")
-    plt.subplot(233),plt.imshow(X_est,**args),plt.title("X")
-    plt.subplot(235),plt.imshow((1-M)*L_est,**args),plt.title("(1-Mask) * L")
-    plt.subplot(236),plt.imshow(M*X_est,**args),plt.title("Mask * X")
+    plt.subplot(231), plt.imshow(M, **args)          , plt.title("Mask")
+    plt.subplot(232), plt.imshow(L_est, **args)      , plt.title("L")
+    plt.subplot(233), plt.imshow(X_est, **args)      , plt.title("X")
+    plt.subplot(235), plt.imshow((1-M)*L_est, **args), plt.title("(1-Mask) * L")
+    plt.subplot(236), plt.imshow(M*X_est, **args)    , plt.title("Mask * X")
 
 
 

@@ -66,7 +66,7 @@ class mayo_estimator:
 
     """
 
-    def __init__(self, datadir="./data", mask_size=15, rot="fft", loss="mse",
+    def __init__(self, datadir="./data", coro=8, rot="fft", loss="mse",
                  regul="smooth", Badframes=None, epsi=1e-3):
 
         # -- Create model and define constants --
@@ -79,22 +79,28 @@ class mayo_estimator:
         self.nb_frames = science_data.shape[0]
         self.L0x0 = None
 
-        mask = circle(self.shape, mask_size)
+        self.coro   = 1 - circle(self.shape, coro)
+        self.coroR  = 1 - circle(self.shape, coro+2)
 
-        self.const = {"science_data": science_data}
-        self.model = model_ADI(angles, mask, rot=rot)
-        self.mask  = 0
+        # To tensor
+
+        self.science_data = self.coro * science_data
+        self.model = model_ADI(angles, self.coro, rot=rot)
+
+        self.coro  = torch.from_numpy(self.coro).double()
+        self.coroR = torch.from_numpy(self.coroR).double()
+        self.science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
 
         # -- Define our minimization problem
         self.fun_loss = MSELoss(reduction='sum')
 
         if regul == "smooth_with_edges":
-            self.regul = lambda X: torch.sum(sobel_tensor_conv(X) ** 2 - epsi ** 2)
+            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X) ** 2 - epsi ** 2)
         elif regul == "smooth":
-            self.regul = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) +\
-                                   torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2) +\
+                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
         elif regul == "l1":
-            self.regul = lambda X: torch.sum(torch.abs(X))
+            self.regul = lambda X: torch.sum(self.coroR * torch.abs(X))
 
         self.regul2 = lambda X, L, M:  0
 
@@ -129,7 +135,7 @@ class mayo_estimator:
             start_time = datetime.now()
             print(sep + "\nInitialisation  ...")
 
-            L0, X0 = init_estimate(self.const["science_data"], self.model.rot_angles, **kwargs)
+            L0, X0 = init_estimate(self.science_data, self.model.rot_angles, **kwargs)
 
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
@@ -180,23 +186,25 @@ class mayo_estimator:
         if not (isinstance(Msk, torch.Tensor) and Msk.shape==self.model.frame_shape):
             raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
 
+        rM = self.coroR # corono mask for regul
+
         if mode == "dist":
             self.mask = Msk
             sign = -1 if invert else 1
-            if   penaliz == "X"   :  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2))
-            elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2))
-            elif penaliz == "both":  self.regul2 = lambda X, L, M: sign * tsqrt(tsum((M - X) ** 2)) -\
-                                                                   sign * tsqrt(tsum((M - L) ** 2))
+            if   penaliz == "X"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
+            elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
+            elif penaliz == "both":  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2) -\
+                                                                   sign * -tsum( rM * (M - L) ** 2)
             else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
 
         elif mode == "mask":
             Msk = Msk/torch.max(Msk)  # Normalize mask
             self.mask = (1-Msk) if invert else Msk
-            if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2))
-            elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsqrt(tsum(((1 - M) * L) ** 2))
-            elif penaliz == "both": self.regul2 = lambda X, L, M: tsqrt(tsum((M * X) ** 2)) + \
-                                                                  tsqrt(tsum(((1 - M) * L) ** 2)) *\
-                                                                  tsum(M)**2/tsum((1 - M))**2
+            if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2)
+            elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum( rM * ((1 - M) * L) ** 2)
+            elif penaliz == "both": self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2) + \
+                                                                  tsum(M)**2/tsum((1 - M))**2 *\
+                                                                  tsum( rM * ((1 - M) * L) ** 2)
 
             else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
 
@@ -263,7 +271,7 @@ class mayo_estimator:
         """
 
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
-        const = self.const
+        science_data = self.science_data
         mink  = 2 # Min number of iter before convergence
         loss_evo = []
 
@@ -275,13 +283,12 @@ class mayo_estimator:
         # ______________________________________
         # Define constantes and convert arry to tensor
 
-        science_data = torch.unsqueeze(torch.from_numpy(const["science_data"]), 1).double()
         science_data.requires_grad = False
 
         L0, X0 = self.L0x0
 
-        L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
-        X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
+        L0 = self.coro * torch.unsqueeze(torch.from_numpy(L0), 0).double()
+        X0 = self.coro * torch.unsqueeze(torch.from_numpy(X0), 0).double()
         flux_0 = torch.ones(self.model.nb_frame - 1)
 
         # ______________________________________
@@ -298,10 +305,10 @@ class mayo_estimator:
 
             if w_pcent and Ractiv :
                 w_r  = w_r * loss0 / self.regul(X0)   # Auto hyperparameters
-                w_r2 = w_r2 * loss0 / self.regul2(X0, L0, self.model.mask)
+                w_r2 = w_r2 * loss0 / self.regul2(X0, L0, self.mask)
 
             R1_0 = Ractiv * w_r * self.regul(X0)
-            R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.model.mask)
+            R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
             loss0 += (R1_0 + R2_0)
 
         loss, R1, R2 = loss0, R1_0, R2_0
@@ -313,7 +320,7 @@ class mayo_estimator:
             with torch.autograd.detect_anomaly():
                 Yk = self.model.forward_ADI(Lk, Xk, flux_k)
                 R1 = Ractiv * w_r * self.regul(Xk)
-                R2 = Ractiv * w_r2 * self.regul2(Xk,Lk,self.mask)
+                R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
                 loss = self.fun_loss(Yk, science_data) + (R1 + R2)
                 loss.backward()
             return loss
@@ -347,13 +354,13 @@ class mayo_estimator:
                 with torch.no_grad():
                     if w_pcent:
                         w_r  = w_r * loss / self.regul(Xk)
-                        w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.model.mask)
+                        w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.mask)
                     if estimI:
                         optimizer = optim.LBFGS([Lk, Xk, flux_k])
                         flux_k.requires_grad = True
                     else:
                         optimizer = optim.LBFGS([Lk, Xk])
-                    print("REGUL HAVE BEEN ACTIVATED with w_r={:.2e} and w_r2={:.2e}".format(w_r,w_r2))
+                    print("REGUL HAVE BEEN ACTIVATED with w_r={:.2e} and w_r2={:.2e}".format(w_r, w_r2))
 
 
             if kdactiv and k == kdactiv: Ractiv = 0  # Shut down regul after few iterations
@@ -369,14 +376,14 @@ class mayo_estimator:
                     with torch.no_grad():
                         if w_pcent:
                             w_r  = w_r * loss / self.regul(Xk)
-                            w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.model.mask)
+                            w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.mask)
                         if estimI:
                             optimizer = optim.LBFGS([Lk, Xk, flux_k])
                             flux_k.requires_grad = True
                         else:
                             optimizer = optim.LBFGS([Lk, Xk])
                     print("Convergence reached : REGUL HAVE BEEN ACTIVATED "
-                          "\nwith w_r={:.2e} and w_r2={:.2e}".format(w_r,w_r2))
+                          "\nwith w_r={:.2e} and w_r2={:.2e}".format(w_r, w_r2))
 
                 else : break
 
@@ -404,23 +411,5 @@ class mayo_estimator:
         if estimI: return L_est, X_est, flux
         else     : return L_est, X_est
 
-    # _____________________________________________________________
-    # _____________ Tools functions of mayo_estimator _____________
-
-    def remove_speckels(self, derot=False):
-        """ Remove the speckle map estimation
-        This can be better than the X estimation from the minimisation due to rotation flaws
-        """
-        if not hasattr(self, 'res'): raise AssertionError("Estimation should be lunched first")
-
-        science_data = self.const["science_data"]
-        L_est, X_est = self.res['x']
-        Xs_est = science_data - L_est
-
-        if derot:
-            for frame in range(self.model.nb_frame): Xs_est[frame] = frame_rotate(Xs_est[frame])
-
-        return Xs_est
-
     def get_science_data(self):
-        return self.model.rot_angles, self.const["science_data"]
+        return self.model.rot_angles, self.science_data.numpy()[:, 0, :, :]

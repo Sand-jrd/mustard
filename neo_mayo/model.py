@@ -32,19 +32,19 @@ class model_ADI:
              x = circumstellar flux
      """
 
-    def __init__(self, rot_angles: np.array, mask: np.array, rot="fft"):
+    def __init__(self, rot_angles: np.array, coro: np.array, rot="fft"):
 
         # -- Constants
 
         # Frames known rotations list
         self.rot_angles = rot_angles
 
-        # Pupil mask
-        self.mask = torch.unsqueeze(torch.from_numpy(mask), 0)
+        # Coro mask
+        self.coro = torch.unsqueeze(torch.from_numpy(coro), 0)
 
         # Sizes
         self.nb_frame = len(rot_angles)
-        self.frame_shape = mask.shape
+        self.frame_shape = coro.shape
 
         # -- Functions
 
@@ -72,6 +72,6 @@ class model_ADI:
 
         for frame_id in range(1, self.nb_frame):
             Rx = self.rot(x.abs(), float(self.rot_angles[frame_id]), **self.rot_args)
-            Y[frame_id] = flux[frame_id-1]*L + Rx
+            Y[frame_id] = self.coro * (flux[frame_id-1]*L + Rx)
 
         return Y

@@ -195,12 +195,13 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, bfgs_iter, loss, R1, R2, config
     plt.clf(), plt.close()
 
 
-def iter_to_gif(save_gif, suffix=""):
+def iter_to_gif(save_gif, suffix=None):
     images = []
     plt.ion()
 
     date = datetime.now()
     if not save_gif: save_gif = "."
+    suffix = '' if not suffix else suffix + '_'
 
     double_init = True
     for file in sorted(glob.glob(save_gif + "/iter/*.png"), key=os.path.getmtime):
