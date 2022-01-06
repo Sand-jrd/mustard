@@ -101,13 +101,13 @@ def laplacian_tensor_conv(tensor, kernel_size=3):
     return filtered
 
 
-def sobel_tensor_conv(tensor,axis="y"):
+def sobel_tensor_conv(tensor, axis="y"):
     """ Apply sovel filter on input tensor X"""
 
     if axis == "y":
         kernel = np.array([[[1, 0, -1],
-                                 [2, 0, -2],
-                                 [1, 0, -1]]], dtype='float64')
+                             [2, 0, -2],
+                             [1, 0, -1]]], dtype='float64')
     elif axis == "x":
         kernel = np.array([[[1, 2, 1],
                             [0, 0, 0],
@@ -120,6 +120,7 @@ def sobel_tensor_conv(tensor,axis="y"):
     filtered = conv2d(tensor.reshape( (1,) + shape), kernel, padding='same')
 
     return filtered
+
 
 def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
     """ Rotates Tensor using Fourier transform phases:
@@ -197,13 +198,13 @@ def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
     return array_out
 
 
-def tensor_fft_shear(arr, arr_ori, c, ax, pad=0, shift_ini=True):
+def tensor_fft_shear(arr, arr_ori, c, ax):
     ax2 = 1 - (ax-1) % 2
     freqs = tf.fftfreq(arr_ori.shape[ax2], dtype=torch.float64)
     sh_freqs = tf.fftshift(freqs)
     arr_u = torch.tile(sh_freqs, (arr_ori.shape[ax-1], 1))
     if ax == 2:
-        arr_u = torch.transpose(arr_u,0,1)
+        arr_u = torch.transpose(arr_u, 0, 1)
     s_x = tf.fftshift(arr)
     s_x = tf.fft(s_x, dim=ax)
     s_x = tf.fftshift(s_x)

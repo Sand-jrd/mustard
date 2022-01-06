@@ -15,7 +15,6 @@ ______________________________
 # For file management
 
 from neo_mayo.utils import unpack_science_datadir
-from vip_hci.preproc import frame_rotate
 from vip_hci.fits import open_fits, write_fits
 from os import mkdir
 from os.path import isdir
@@ -29,13 +28,12 @@ import numpy as np
 from torch.nn import MSELoss
 import torch.optim as optim
 from torch import sum as tsum
-from torch import sqrt as tsqrt
 
 # Other
 from neo_mayo.utils import circle, iter_to_gif, print_iter
 from neo_mayo.model import model_ADI
 
-# For verbose
+# -- For verbose -- #
 from datetime import datetime
 import warnings
 
@@ -51,12 +49,12 @@ init_msg = sep + "\nResolving mayo optimization problem ..." +\
                  "\nMinimiz LBFGS with '{}' loss and '{}' regul" +\
                  "\nw_r are sets to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
 
-loss_ratio = lambda Ractiv,R1, R2, L: tuple(np.array((1, 100/L)) * R1) + \
+loss_ratio = lambda Ractiv, R1, R2, L: tuple(np.array((1, 100/L)) * R1) + \
                                tuple(np.array((1, 100/L)) * R2) + \
                                tuple(np.array((1, 100/L)) * (L - Ractiv * (R1 + R2)))
 
-# %%
 
+# %%
 
 class mayo_estimator:
     """ Neo-mayo Algorithm main class 
@@ -66,7 +64,7 @@ class mayo_estimator:
 
     """
 
-    def __init__(self, datadir="./data", coro=6, rot="fft", loss="mse",
+    def __init__(self, datadir="./data", coro=6, pupil="edge", rot="fft", loss="mse",
                  regul="smooth", Badframes=None, epsi=1e-3):
 
         # -- Create model and define constants --
@@ -75,20 +73,33 @@ class mayo_estimator:
             science_data = np.delete(science_data, Badframes, 0)
             angles = np.delete(angles, Badframes, 0)
 
+        # Constants
         self.shape = science_data[0].shape
         self.nb_frames = science_data.shape[0]
         self.L0x0 = None
+        self.mask = 1  # R2 mask default. Will be set if call R2 config
 
-        self.coro   = 1 - circle(self.shape, coro)
-        self.coroR  = 1 - circle(self.shape, coro+2)
+        # Coro and pupil masks
+        if pupil is None: pupil = np.ones(self.shape); pupilR = pupil
+        elif pupil == "edge":
+            pupil  = circle(self.shape, self.shape[0]/2)
+            pupilR = circle(self.shape, self.shape[0]/2 - 2)
+        elif isinstance(pupil, float) or isinstance(pupil, int):
+            pupil  = circle(self.shape, pupil)
+            pupilR = circle(self.shape, pupil - 2)
+        else: raise ValueError("Invalid pupil key argument. Possible values : {float/int, None, 'edge'}")
 
-        # To tensor
+        if coro is None: coro = 0
+        self.coro   = (1 - circle(self.shape, coro)) * pupil
+        self.coroR  = (1 - circle(self.shape, coro+2)) * pupilR
 
+        # Convert to tensor
         self.science_data = self.coro * science_data
         self.model = model_ADI(angles, self.coro, rot=rot)
 
         self.coro  = torch.from_numpy(self.coro).double()
         self.coroR = torch.from_numpy(self.coroR).double()
+
         self.science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
 
         # -- Define our minimization problem
@@ -150,10 +161,11 @@ class mayo_estimator:
 
         return L0, X0
 
-    def configR2(self, Msk, mode = "mask", penaliz = "X", invert=False):
+    def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False):
         """ Configuration for Second regularization.
-        Two possible mode :   R = M*X)      (mode mask)
-                           or R = dist(M-X) (mode dist)
+        Two possible mode :   R = M*X      (mode 'mask')
+                           or R = dist(M-X) (mode 'dist')
+                           or R = sum(X)   (mode 'l1')
 
         Parameters
         ----------
@@ -173,7 +185,9 @@ class mayo_estimator:
         With mode dist :
             if "X" : R = dist(M-X)
             if "L" : L = -dist(M-L)
-        If "both" : will do both
+        With mode l1 :
+            if "X" : R = sum(X)
+            if "L" : L = -sum(L)
 
         invert : Bool
         Reverse penalize mode bewteen L and X.
@@ -182,12 +196,15 @@ class mayo_estimator:
         -------
 
         """
-        if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
-        if not (isinstance(Msk, torch.Tensor) and Msk.shape==self.model.frame_shape):
-            raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
+        if mode != 'l1' :
+            if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
+            if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
+                raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
 
         penaliz = penaliz.capitalize()
-        rM = self.coroR # corono mask for regul
+        rM = self.coroR  # corono mask for regul
+        if penaliz not in ("X", "L", "Both", "B") :
+            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
 
         if mode == "dist":
             self.mask = Msk
@@ -196,7 +213,6 @@ class mayo_estimator:
             elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
             elif penaliz in ("Both", "B"):  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2) -\
                                                                    sign * -tsum( rM * (M - L) ** 2)
-            else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
 
         elif mode == "mask":
             Msk = Msk/torch.max(Msk)  # Normalize mask
@@ -207,9 +223,12 @@ class mayo_estimator:
                                                                   tsum(M)**2/tsum((1 - M))**2 *\
                                                                   tsum( rM * ((1 - M) * L) ** 2)
 
-            else: raise Exception("Unknown value of penaliz. Possible values are 'X','L' or 'both'")
+        elif mode == "l1":
+            if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum(X ** 2)
+            elif penaliz == "L"   : self.regul2 = lambda X, L, M: -tsum(L ** 2)
+            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: tsum(X ** 2)-tsum(L ** 2)
 
-        else: raise Exception("Unknown value of mode. Possible values are 'mask' or 'dist'")
+        else: raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
 
     def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, maxiter=10,
                  gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
@@ -258,7 +277,7 @@ class mayo_estimator:
         suffix : string
             String suffix to named the simulation outputs
 
-        gif : str or None
+        gif : bool
             if path is given, save each the minimization step as a gif
 
         verbose : bool
@@ -273,7 +292,7 @@ class mayo_estimator:
 
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
         science_data = self.science_data
-        mink  = 2 # Min number of iter before convergence
+        mink  = 2  # Min number of iter before convergence
         loss_evo = []
 
         # Regularization activation init setting
@@ -350,8 +369,8 @@ class mayo_estimator:
             if gif: print_iter(Lk, Xk, k, loss, R1, R2, self.config, w_r, w_r2, Ractiv, estimI, flux_k, save)
 
             # Activation
-            if kactiv and k == kactiv: # Only activate regul after few iterations
-                Ractiv = 1; mink=k+2
+            if kactiv and k == kactiv:  # Only activate regul after few iterations
+                Ractiv = 1; mink = k+2
                 with torch.no_grad():
                     if w_pcent:
                         w_r  = w_r * loss / self.regul(Xk)
@@ -363,17 +382,16 @@ class mayo_estimator:
                         optimizer = optim.LBFGS([Lk, Xk])
                     print("REGUL HAVE BEEN ACTIVATED with w_r={:.2e} and w_r2={:.2e}".format(w_r, w_r2))
 
-
             if kdactiv and k == kdactiv: Ractiv = 0  # Shut down regul after few iterations
 
             # -- MINIMIZER STEP -- #
             optimizer.step(closure)
 
             # Break point
-            if k>mink and (abs(loss_evo[-2] - loss_evo[-1])) < gtol:
+            if k > mink and (abs(loss_evo[-2] - loss_evo[-1])) < gtol:
 
                 if not Ractiv and kactiv:
-                    Ractiv = 1; mink=k+2
+                    Ractiv = 1; mink = k+2
                     with torch.no_grad():
                         if w_pcent:
                             w_r  = w_r * loss / self.regul(Xk)

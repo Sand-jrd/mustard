@@ -9,12 +9,11 @@ Tests of neo-mayo
 """
 import matplotlib.pyplot as plt
 from neo_mayo import mayo_estimator
-from neo_mayo.utils import ellipse,circle
+from neo_mayo.utils import ellipse, circle
 from vip_hci.fits import open_fits
 from vip_hci.var import frame_filter_lowpass
 from vip_hci.preproc import frame_rotate
 import numpy as np
-import glob
 import torch
 
 # %% -------------------------------------
@@ -22,8 +21,8 @@ import torch
 
 # Choose where to get datas
 
-# datadir = "./example-data/"
-datadir = "../PDS70-neomayo/095.C-0298B/H2/"
+datadir = "./example-data/"
+# datadir = "../PDS70-neomayo/095.C-0298B/H2/"
 
 Test_ini    = False
 Test_model  = False
@@ -32,8 +31,8 @@ Test_mayo   = True
 i_have_time = False # Extra outputs
 show_mask   = True
 
-param = {'w_r'   : 0.01,
-        'w_r2'   : 0.05,
+param = {'w_r'   : 0.05,
+        'w_r2'   : 0.01,
         'gtol'   : 1e-10,
         'kactiv' : 3,
         'kdactiv': 20,
@@ -56,9 +55,9 @@ M = ellipse(model.frame_shape, 85, 50, 13) \
     - circle(model.frame_shape, 25)
 M = circle(model.frame_shape, 60)
 
-R2_param = { 'Msk'    : M,
-           'mode'   : "mask",
-           'penaliz': "both",
+R2_param = { 'Msk'    : None,
+           'mode'   : "l1",
+           'penaliz': "x",
            'invert' : False }
 
 estimator.configR2(**R2_param)

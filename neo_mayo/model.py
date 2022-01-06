@@ -68,10 +68,10 @@ class model_ADI:
 
         # First image. No intensity vector
         Rx = self.rot(x.abs(), float(self.rot_angles[0]), **self.rot_args)
-        Y[0] = L + Rx
+        Y[0] = L + self.coro * Rx
 
         for frame_id in range(1, self.nb_frame):
             Rx = self.rot(x.abs(), float(self.rot_angles[frame_id]), **self.rot_args)
-            Y[frame_id] = self.coro * (flux[frame_id-1]*L + Rx)
+            Y[frame_id] = flux[frame_id-1]*L + self.coro * Rx
 
         return Y
