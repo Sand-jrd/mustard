@@ -45,27 +45,54 @@ info_iter = "Iteration n°{} : total loss {:.6e}" +\
             "\n\tWith R2 = {:.4e} ({:.0f}%)" +\
             "\n\tand loss = {:.4e} ({:.0f}%)"
 
-init_msg = sep + "\nResolving mayo optimization problem ..." +\
-                 "\nMinimiz LBFGS with '{}' loss and '{}' regul" +\
+init_msg = sep + "\nResolving IP-ADI optimization problem ..." +\
+                 "\nProcessing cube from : {}" +\
+                 "\nMinimiz LBFGS with J : '{}' loss,  R1 : '{}' and R2 : '{}'" +\
                  "\nw_r are sets to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
 
-loss_ratio = lambda Ractiv, R1, R2, L: tuple(np.array((1, 100/L)) * R1) + \
-                               tuple(np.array((1, 100/L)) * R2) + \
-                               tuple(np.array((1, 100/L)) * (L - Ractiv * (R1 + R2)))
+def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
+    """ Compute Regul weight over data attachment terme """
+    return tuple(np.array((1, 100/L)) * R1) + \
+           tuple(np.array((1, 100/L)) * R2) + \
+           tuple(np.array((1, 100/L)) * (L - Ractiv * (R1 + R2)))
 
 
 # %%
 
 class mayo_estimator:
-    """ Neo-mayo Algorithm main class 
-   
-    /!\ Neo-mayo isn't exaclty the same as Mayo pipeline. 
-    Some choices have been re-thinked
-
-    """
+    """ Neo-mayo Algorithm main class  """
 
     def __init__(self, datadir="./data", coro=6, pupil="edge", rot="fft", loss="mse",
                  regul="smooth", Badframes=None, epsi=1e-3):
+        """
+        Initialisation of estimator object
+
+        Parameters
+        ----------
+        datadir : str
+            path to data. In this folder, it must find a json file.
+            The json should tell the fits file name of cube and angles.
+            Json tempalte can be found in exemple-data/0_import_info.json
+        coro : int
+            size of the coronograph
+        pupil : int, None or "edge"
+            Size of the pupil.
+            If pupil is set to "edge" : the pupil raduis will be half the size of the frame
+            If pupil is set to None : there will be no pupil at all
+        rot : (WILL BE REMOVED IN THE FUTURE) str
+            Rotation mode :
+            if 'fft' : roation using fourier transform
+            else : torchvision bilinerar rotation
+        loss : (WILL BE REMOVED IN THE FUTURE)
+            Loss mode {'mse','huber'}
+        regul : (WILL MAYBE BE REMOVE BECAUSE USELESS)'str'
+            R1 regularization mode {'smooth', 'smooth_with_edges', 'l1'}
+            The R1 will be applied on X (disk and planet contribution)
+        Badframes : tuple or list
+            Bad frames that you will not be taken into account
+        epsi : (WILL MAYBE BE REMOVE BECAUSE USELESS) float
+            'smooth_with_edges' parameters
+        """
 
         # -- Create model and define constants --
         angles, science_data = unpack_science_datadir(datadir)
@@ -78,6 +105,7 @@ class mayo_estimator:
         self.nb_frames = science_data.shape[0]
         self.L0x0 = None
         self.mask = 1  # R2 mask default. Will be set if call R2 config
+        self.name = datadir
 
         # Coro and pupil masks
         if pupil is None: pupil = np.ones(self.shape); pupilR = pupil
@@ -100,8 +128,6 @@ class mayo_estimator:
         self.coro  = torch.from_numpy(self.coro).double()
         self.coroR = torch.from_numpy(self.coroR).double()
 
-        self.science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-
         # -- Define our minimization problem
         self.fun_loss = MSELoss(reduction='sum')
 
@@ -115,18 +141,29 @@ class mayo_estimator:
 
         self.regul2 = lambda X, L, M:  0
 
-        self.config = regul, loss
+        self.config = [loss, regul, None]   # Config list : [loss, R1, R2]
+        self.res = None
 
-    def initialisation(self, from_dir=None, save=None, **kwargs):
-        """ The first step with greed aim to find a good initialisation 
+    def initialisation(self, from_dir=None, save=None, Imode="pca",  **kwargs):
+        """ Init L0 (starlight) and X0 (circonstellar) with a PCA
          
          Parameters
          ----------
-         save
-         from_dir : str (optional)
-             if None, compute iterative PCA
+          from_dir : str (optional)
+             if None, compute PCA
              if a path is given, get L0 (starlight) and X0 (circonstellar) from the directory
-         
+
+          save : str (optional)
+             if a path is given, L0 (starlight) and X0 (circonstellar) will be saved at the given emplacement
+
+          Imode : str
+            Type of initialisation : {'pcait','pca'}
+
+          kwargs :
+             Argument that will be pass to :
+             vip_hci.pca.pca_fullfr.pca if 'Imode' = 'pca'
+             vip_hci.itpca.pca_it if 'Imode' = 'pcait'
+
          Returns
          -------
          L_est, X_est: ndarray
@@ -146,7 +183,7 @@ class mayo_estimator:
             start_time = datetime.now()
             print(sep + "\nInitialisation  ...")
 
-            L0, X0 = init_estimate(self.science_data, self.model.rot_angles, **kwargs)
+            L0, X0 = init_estimate(self.science_data, self.model.rot_angles,Imode=Imode , **kwargs)
 
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
@@ -170,27 +207,27 @@ class mayo_estimator:
         Parameters
         ----------
         Msk : numpy.array or torch.tensor
-        Prior mask of X.
+            Prior mask of X.
 
         mode : {"mask","dist"}.
-        if "mask" :  R = norm(M*X)
-            if M will be normalize to have values from 0 to 1.
-        if "dist" :  R = dist(M-X)
+            if "mask" :  R = norm(M*X)
+                if M will be normalize to have values from 0 to 1.
+            if "dist" :  R = dist(M-X)
 
         penaliz : {"X","L","both"}
-        Unknown to penaliz.
-        With mode mask :
-            if "X" : R = norm(M*X)
-            if "L" : R = norm((1-M)*L)
-        With mode dist :
-            if "X" : R = dist(M-X)
-            if "L" : L = -dist(M-L)
-        With mode l1 :
-            if "X" : R = sum(X)
-            if "L" : L = -sum(L)
+            Unknown to penaliz.
+            With mode mask :
+                if "X" : R = norm(M*X)
+                if "L" : R = norm((1-M)*L)
+            With mode dist :
+                if "X" : R = dist(M-X)
+                if "L" : L = -dist(M-L)
+            With mode l1 :
+                if "X" : R = sum(X)
+                if "L" : L = -sum(L)
 
         invert : Bool
-        Reverse penalize mode bewteen L and X.
+            Reverse penalize mode bewteen L and X.
 
         Returns
         -------
@@ -209,31 +246,36 @@ class mayo_estimator:
         if mode == "dist":
             self.mask = Msk
             sign = -1 if invert else 1
-            if   penaliz == "X"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
-            elif penaliz == "L"   :  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2)
-            elif penaliz in ("Both", "B"):  self.regul2 = lambda X, L, M: sign * tsum( rM * (M - X) ** 2) -\
-                                                                   sign * -tsum( rM * (M - L) ** 2)
+            if   penaliz == "X"   :  self.regul2 = lambda X, L, M: tsum( rM * (M - X) ** 2)
+            elif penaliz == "L"   :  self.regul2 = lambda X, L, M: tsum( rM * (M - X) ** 2)
+            elif penaliz in ("Both", "B"):  self.regul2 = lambda X, L, M: sign * (tsum( rM * (M - X) ** 2) -
+                                                                                  tsum( rM * (M - L) ** 2))
 
         elif mode == "mask":
             Msk = Msk/torch.max(Msk)  # Normalize mask
             self.mask = (1-Msk) if invert else Msk
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2)
             elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum( rM * ((1 - M) * L) ** 2)
-            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2) + \
+            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2) +\
                                                                   tsum(M)**2/tsum((1 - M))**2 *\
                                                                   tsum( rM * ((1 - M) * L) ** 2)
 
         elif mode == "l1":
+            sign = -1 if invert else 1
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum(X ** 2)
-            elif penaliz == "L"   : self.regul2 = lambda X, L, M: -tsum(L ** 2)
-            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: tsum(X ** 2)-tsum(L ** 2)
+            elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum(L ** 2)
+            elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
 
         else: raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
 
+        R2_name = mode + " on " + penaliz
+        R2_name += " inverted" if invert else ""
+        self.config[2] = R2_name
+
     def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, maxiter=10,
                  gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
-        """ Resole the minimization problem as describe in mayo
-            The first step with greed aim to find a good initialisation 
+        """ Resole the minimization of probleme neo-mayo
+            The first step with pca aim to find a good initialisation
             The second step process to the minimization
          
         Parameters
@@ -291,7 +333,6 @@ class mayo_estimator:
         """
 
         if self.L0x0 is None: raise AssertionError("No L0/x0. You need to run initialisation")
-        science_data = self.science_data
         mink  = 2  # Min number of iter before convergence
         loss_evo = []
 
@@ -303,6 +344,7 @@ class mayo_estimator:
         # ______________________________________
         # Define constantes and convert arry to tensor
 
+        science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
         science_data.requires_grad = False
 
         L0, X0 = self.L0x0
@@ -355,7 +397,8 @@ class mayo_estimator:
         # ______________________________________
         #  Minimizations Start
 
-        print(init_msg.format(str(self.config[1]), str(self.config[0]), w_r, w_r2, str(maxiter)))
+        stat_msg = init_msg.format(self.name, *self.config, w_r, w_r2, str(maxiter))
+        print(stat_msg)
         start_time = datetime.now()
 
         # -- Minimization Start ! -- #
@@ -365,8 +408,9 @@ class mayo_estimator:
             loss_evo.append(loss)
 
             # Prints
-            if verbose: print(info_iter.format(k, loss, *loss_ratio(Ractiv, float(R1), float(R2), float(loss))))
-            if gif: print_iter(Lk, Xk, k, loss, R1, R2, self.config, w_r, w_r2, Ractiv, estimI, flux_k, save)
+            iter_msg = info_iter.format(k, loss, *loss_ratio(Ractiv, float(R1), float(R2), float(loss)))
+            if verbose: print(iter_msg)
+            if gif: print_iter(Lk, Xk, flux_k, k, stat_msg.split("\n", 4)[3] + '\n' + iter_msg, save)
 
             # Activation
             if kactiv and k == kactiv:  # Only activate regul after few iterations
@@ -433,4 +477,5 @@ class mayo_estimator:
         else     : return L_est, X_est
 
     def get_science_data(self):
-        return self.model.rot_angles, self.science_data.numpy()[:, 0, :, :]
+        """Return input cube and angles"""
+        return self.model.rot_angles, self.science_data

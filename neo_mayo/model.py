@@ -59,8 +59,8 @@ class model_ADI:
         self.conv = lambda x, y, **kwargs: torch.abs(torch.fft.ifftshift(
             torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) * torch.fft.fftshift(torch.fft.fft2(y)))))
 
-    def forward_ADI(self, L, x, flux=None):
-        """ Process forward model  : Y =  ( l_i * L + R(x)) )  """
+    def forward_ADI(self, L: torch.Tensor, x: torch.Tensor, flux=None) -> torch.Tensor:
+        """ Process forward model  : Y =  ( flux * L + R(x)) )  """
 
         if flux is None: flux = torch.ones(self.nb_frame - 1)
 

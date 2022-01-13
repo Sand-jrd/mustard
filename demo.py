@@ -10,7 +10,6 @@ Tests of neo-mayo
 import matplotlib.pyplot as plt
 from neo_mayo import mayo_estimator
 from neo_mayo.utils import ellipse, circle
-from vip_hci.fits import open_fits
 from vip_hci.var import frame_filter_lowpass
 from vip_hci.preproc import frame_rotate
 import numpy as np
@@ -21,8 +20,9 @@ import torch
 
 # Choose where to get datas
 
-datadir = "./example-data/"
-# datadir = "../PDS70-neomayo/095.C-0298B/H2/"
+# datadir = "./example-data/"
+datadir = "../PDS70-neomayo/097.C-1001A/K1/"
+# datadir = "../PDS70-neomayo/095.C-0298B/H3/"
 
 Test_ini    = False
 Test_model  = False
@@ -31,17 +31,19 @@ Test_mayo   = True
 i_have_time = False # Extra outputs
 show_mask   = True
 
-param = {'w_r'   : 0.05,
-        'w_r2'   : 0.01,
+param = {'w_r'   : 0.00001,
+        'w_r2'   : 0.0001,
         'gtol'   : 1e-10,
-        'kactiv' : 3,
-        'kdactiv': 20,
+        'kactiv' : None,
+        'kdactiv': None,
         'estimI' : True,
         'suffix' : None,
-        'maxiter': 35}
+        'maxiter': 30}
 
-Badframes = (0, 23, 38)
-Badframes = None
+# Badframes = (0, 21, 36, 42)
+Badframes = list(range(0, 672))
+for k, ii in enumerate(range(0, 672, 2)) : del Badframes[ii-k]
+# Badframes = None
 
 # init the estimator and set variable
 estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
@@ -53,11 +55,11 @@ angles, science_data = estimator.get_science_data()
 # init R2 regularization (optional)
 M = ellipse(model.frame_shape, 85, 50, 13) \
     - circle(model.frame_shape, 25)
-M = circle(model.frame_shape, 60)
+# M = circle(model.frame_shape, 60)
 
 R2_param = { 'Msk'    : None,
            'mode'   : "l1",
-           'penaliz': "x",
+           'penaliz': "l",
            'invert' : False }
 
 estimator.configR2(**R2_param)
@@ -68,7 +70,7 @@ estimator.configR2(**R2_param)
 
 if Test_ini:
 
-    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", mode="pca", max_comp=1, nb_iter=10)
+    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0")
 
     # ___________________
     # Show results

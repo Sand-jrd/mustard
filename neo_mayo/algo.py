@@ -24,45 +24,50 @@ import numpy as np
 
 # %% Initialisation / kind of PCA / PCA iter
 
-def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
-    """ Iterative PCA as describe in Mayo """
+def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='pca', **kwarg) -> (np.ndarray, np.ndarray):
+    """
+    Estimate Satrlight and Circoncstelar light using pca
+
+    Parameters
+    ----------
+    cube : np.ndarray
+        Cube of ADI science data
+
+    angle_list : np.ndarray
+        Rotation angle associated with the ADI cube
+
+    Imode : {'pca',''pcait}
+        mode of pca
+
+    kwarg :
+        Arguments that will be pass to vip function for pca or pcait
+
+    Returns
+    -------
+    L and X : (np.ndarray, np.ndarray)
+        Estimated starlight and circonstelar light
+    """
 
     L_k = np.zeros(cube.shape)
-    X_k = np.zeros(cube.shape)
     nb_frame = cube.shape[0]
 
-    if mode == "sand":
-        print("Mode pca iterative by sand ")
-        for iter_k in range(n_it):
-            for nb_comp in range(ncomp_step):
-
-                res = pca_fullfr.pca(L_k, angle_list, ncomp=nb_comp, verbose=False)
-
-                # Since res is derotated we have to rerotate it ...
-                for frame_id in range(nb_frame):
-                    frame_id_rot = frame_rotate(res, angle_list[frame_id])
-                    L_k[frame_id] = cube[frame_id] - frame_id_rot.clip(min=0)
-                    X_k[frame_id] = frame_id_rot.clip(min=0)
-
-    if mode == "pca":
+    if Imode == "pca":
         print("Mode pca")
-        res = pca_fullfr.pca(cube, angle_list, ncomp=ncomp_step, verbose=False)
+        res = pca_fullfr.pca(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
             cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
             L_k[frame_id] = cube_der_rot - res.clip(min=0)
 
-    else:
+    elif Imode == "pcait":
         print("Mode pca iterative")
-        res = pca_it(cube, angle_list,
-                     mode=mode,
-                     ncomp_step=ncomp_step,
-                     n_it=n_it,
-                     verbose=False, **kwarg)
+        res = pca_it(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
             cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
             L_k[frame_id] = cube_der_rot - res.clip(min=0)
+
+    else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'pca','pcait'}")
 
     return np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
 
@@ -70,8 +75,22 @@ def init_estimate(cube, angle_list, mode=None, ncomp_step=1, n_it=10, **kwarg):
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
 
-def laplacian_tensor_conv(tensor, kernel_size=3):
-    """ Apply laplacian filter on input tensor X"""
+def laplacian_tensor_conv(tensor: torch.Tensor, kernel_size=3) -> torch.Tensor:
+    """
+    Apply laplacian filter on input tensor X
+
+    Parameters
+    ----------
+    tensor : torch.Tensor
+        input tensor
+    kernel_size : {3, 5 , 7}
+        Lpalacian kernel size
+
+    Returns
+    -------
+    torch.Tensor
+
+    """
 
     kernel3 = torch.Tensor([[[[-1, -1, -1],
                               [-1, 8, -1],
@@ -88,6 +107,7 @@ def laplacian_tensor_conv(tensor, kernel_size=3):
                               [-2, 3, 6, 7, 6, 3, -2],
                               [-5, 0, 3, 4, 3, 0, -5],
                               [-10, -5, -2, -1, -2, -5, -10]]]])
+
     if kernel_size == 3:
         kernel = kernel3
     elif kernel_size == 5:
@@ -101,8 +121,23 @@ def laplacian_tensor_conv(tensor, kernel_size=3):
     return filtered
 
 
-def sobel_tensor_conv(tensor, axis="y"):
-    """ Apply sovel filter on input tensor X"""
+def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
+    """
+    Apply 3x3 sobel filter on input tensor X
+
+    Parameters
+    ----------
+    tensor : torch.tensor
+        input tensor
+
+    axis : {'y','x'}
+        direction of the sobel filter
+
+    Returns
+    -------
+    torch.Tensor
+
+    """
 
     if axis == "y":
         kernel = np.array([[[1, 0, -1],
