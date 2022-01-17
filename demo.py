@@ -20,30 +20,30 @@ import torch
 
 # Choose where to get datas
 
-# datadir = "./example-data/"
-datadir = "../PDS70-neomayo/097.C-1001A/K1/"
-# datadir = "../PDS70-neomayo/095.C-0298B/H3/"
+datadir = "./example-data/"
+# datadir = "../PDS70-neomayo/097.C-1001A/K1/"
+#datadir = "../PDS70-neomayo/095.C-0298B/H3/"
 
 Test_ini    = False
 Test_model  = False
 Test_regul  = False
 Test_mayo   = True
-i_have_time = False # Extra outputs
+i_have_time = False  # Extra outputs
 show_mask   = True
 
-param = {'w_r'   : 0.00001,
-        'w_r2'   : 0.0001,
+param = {'w_r'   : 0.07,
+        'w_r2'   : 0.05,
         'gtol'   : 1e-10,
-        'kactiv' : None,
+        'kactiv' : 3,
         'kdactiv': None,
         'estimI' : True,
         'suffix' : None,
-        'maxiter': 30}
+        'maxiter': 15}
 
-# Badframes = (0, 21, 36, 42)
-Badframes = list(range(0, 672))
-for k, ii in enumerate(range(0, 672, 2)) : del Badframes[ii-k]
-# Badframes = None
+# Badframes = (0, 35, 36)
+# Badframes = list(range(0, 672))
+# for k, ii in enumerate(range(0, 672, 5)) : del Badframes[ii-k]
+Badframes = None
 
 # init the estimator and set variable
 estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
@@ -59,8 +59,8 @@ M = ellipse(model.frame_shape, 85, 50, 13) \
 
 R2_param = { 'Msk'    : None,
            'mode'   : "l1",
-           'penaliz': "l",
-           'invert' : False }
+           'penaliz': "X",
+           'invert' : False}
 
 estimator.configR2(**R2_param)
 

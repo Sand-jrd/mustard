@@ -11,6 +11,7 @@ ______________________________
 
 @author: sand-jrd
 """
+
 # Misc
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
@@ -26,9 +27,10 @@ from os import mkdir
 from os.path import isdir
 from datetime import datetime
 
-BoxStyle = dict(boxstyle='square', pad=1.3, mutation_scale=0.01, facecolor='indigo', alpha=0.65)
-FontStyle = dict(family= 'sans', color= 'beige', weight='normal', size= 12)
-estimBox = dict(boxstyle='square', facecolor='beige', edgecolor='indigo', alpha=0.65)
+BoxStyle  = {"boxstyle": 'square', "pad": 1.3, "mutation_scale": 0.01, "facecolor":'indigo', "alpha": 0.65}
+FontStyle = {"family": 'sans', "color": 'beige', "weight": 'normal', "size": 12}
+estimBox  = {"boxstyle": 'square', "facecolor": 'beige', "edgecolor": 'indigo', "alpha": 0.65}
+titleFont = {'color': 'indigo', "weight": "bold", "backgroundcolor": 'beige'}
 
 
 # %% Create patterns
@@ -71,7 +73,7 @@ def circle(shape: tuple, r: float, offset=(0.5, 0.5)):
     return M
 
 
-def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_center=[0, 0]) -> np.ndarray:
+def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_center=(0, 0)) -> np.ndarray:
     """ Create ellipse of 1 in a 2D matrix of zeros"
 
        Parameters
@@ -100,7 +102,7 @@ def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_c
     nb_f  = shape[0]  if len(shape) == 3 else 0
     shape = shape[1:] if len(shape) == 3 else shape
 
-    mid =  np.array(shape) // 2 - off_center
+    mid =  np.array(shape) // 2 - np.array(off_center)
     M = np.zeros(shape)
     rotation = np.deg2rad(rotation)
 
@@ -149,7 +151,7 @@ def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
 
 
 def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: int, msg_box: str,
-               datadir: str or bool) -> None:
+               extra_msg: str or None, datadir: str or bool) -> None:
 
     L_np  = L.detach().numpy()[0, :, :]
     X_np  = x.detach().numpy()[0, :, :]
@@ -162,25 +164,23 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: 
     plt.subplots(col, 2, figsize=(16, 9), gridspec_kw={'height_ratios': ratios})
 
     plt.suptitle("Iteration n°" + str(bfgs_iter))
-    vmin = np.median(L_np) * 0.8
-    vmax = np.percentile(L_np, 100)
-    if vmin < np.finfo(np.float32).eps :
-        L_no0 = L_np.copy()
-        L_no0[L_no0 < np.finfo(np.float32).eps] = np.finfo(np.float32).eps
-        vmin = np.median(L_no0) * 0.8
 
-    print(vmin,vmax)
-    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(L_np, 100), vmin=vmin)}
+    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(L_np, 100), vmin=np.median(L_np) * 0.8)}
 
     if not bfgs_iter : title = "Initialisation"
     else : title = "Estimation of L and X"
+    if extra_msg : title += "\n" + extra_msg; titleFont["color"] = 'red'
     if flux.requires_grad : title += " and flux"
     title += " at iteration n°" + str(bfgs_iter)
 
-    plt.suptitle(title)
+    plt.suptitle(title, **titleFont)
 
-    plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) "), plt.colorbar()
-    plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)"), plt.colorbar()
+    try :
+        plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) "), plt.colorbar()
+        plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)"), plt.colorbar()
+    except Exception as e :
+        raise Exception("Something went wrong when printing outputs. It might be diverging\n"
+                        "I advise you to check last iteration and to retry with shutting down/reduce regularization")
 
     if flux.requires_grad :
 

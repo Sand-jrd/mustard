@@ -13,7 +13,6 @@ ______________________________
 """
 
 # For file management
-
 from neo_mayo.utils import unpack_science_datadir
 from vip_hci.fits import open_fits, write_fits
 from os import mkdir
@@ -50,15 +49,17 @@ init_msg = sep + "\nResolving IP-ADI optimization problem ..." +\
                  "\nMinimiz LBFGS with J : '{}' loss,  R1 : '{}' and R2 : '{}'" +\
                  "\nw_r are sets to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
 
+activ_msg = "REGUL HAVE BEEN {} with w_r={:.2e} and w_r2={:.2e}"
+
+
 def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
     """ Compute Regul weight over data attachment terme """
-    return tuple(np.array((1, 100/L)) * R1) + \
-           tuple(np.array((1, 100/L)) * R2) + \
-           tuple(np.array((1, 100/L)) * (L - Ractiv * (R1 + R2)))
+    return tuple(np.array((1, 100/L)) * abs(R1)) + \
+           tuple(np.array((1, 100/L)) * abs(R2)) + \
+           tuple(np.array((1, 100/L)) * (L - Ractiv * (abs(R1) + abs(R2))))
 
 
 # %%
-
 class mayo_estimator:
     """ Neo-mayo Algorithm main class  """
 
@@ -79,16 +80,16 @@ class mayo_estimator:
             Size of the pupil.
             If pupil is set to "edge" : the pupil raduis will be half the size of the frame
             If pupil is set to None : there will be no pupil at all
-        rot : (WILL BE REMOVED IN THE FUTURE) str
+        rot : str (WILL BE REMOVED IN THE FUTURE)
             Rotation mode :
             if 'fft' : roation using fourier transform
             else : torchvision bilinerar rotation
-        loss : (WILL BE REMOVED IN THE FUTURE)
+        loss : str (WILL BE REMOVED IN THE FUTURE)
             Loss mode {'mse','huber'}
-        regul : (WILL MAYBE BE REMOVE BECAUSE USELESS)'str'
+        regul : str (WILL MAYBE BE REMOVE BECAUSE USELESS)
             R1 regularization mode {'smooth', 'smooth_with_edges', 'l1'}
             The R1 will be applied on X (disk and planet contribution)
-        Badframes : tuple or list
+        Badframes : tuple or list or None
             Bad frames that you will not be taken into account
         epsi : (WILL MAYBE BE REMOVE BECAUSE USELESS) float
             'smooth_with_edges' parameters
@@ -142,7 +143,7 @@ class mayo_estimator:
         self.regul2 = lambda X, L, M:  0
 
         self.config = [loss, regul, None]   # Config list : [loss, R1, R2]
-        self.res = None
+        self.res = None; self.last_iter = None
 
     def initialisation(self, from_dir=None, save=None, Imode="pca",  **kwargs):
         """ Init L0 (starlight) and X0 (circonstellar) with a PCA
@@ -183,7 +184,7 @@ class mayo_estimator:
             start_time = datetime.now()
             print(sep + "\nInitialisation  ...")
 
-            L0, X0 = init_estimate(self.science_data, self.model.rot_angles,Imode=Imode , **kwargs)
+            L0, X0 = init_estimate(self.science_data, self.model.rot_angles, Imode=Imode , **kwargs)
 
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
@@ -219,12 +220,15 @@ class mayo_estimator:
             With mode mask :
                 if "X" : R = norm(M*X)
                 if "L" : R = norm((1-M)*L)
+                if "B" : R = norm(M*X) + norm((1-M)*L)
             With mode dist :
                 if "X" : R = dist(M-X)
-                if "L" : L = -dist(M-L)
+                if "L" : R = dist(M-L)
+                if "B" : R = dist(M-X) - dist(M-L)
             With mode l1 :
                 if "X" : R = sum(X)
-                if "L" : L = -sum(L)
+                if "L" : R = sum(L)
+                if "B" : R = sum(X) - sum(L)
 
         invert : Bool
             Reverse penalize mode bewteen L and X.
@@ -337,9 +341,10 @@ class mayo_estimator:
         loss_evo = []
 
         # Regularization activation init setting
-        if kactiv == "converg" : kactiv = maxiter
-        Ractiv = 0 if kactiv else 1
-        if not kdactiv: kdactiv = maxiter
+        if kactiv == "converg" : kactiv = maxiter  # If option converge, kactiv start when miniz end
+        if not kdactiv: kdactiv = None  # deactiv = 0 mean deactiv = None
+        Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
+        w_rp = w_r, w_r2 if w_pcent else  0, 0
 
         # ______________________________________
         # Define constantes and convert arry to tensor
@@ -366,14 +371,16 @@ class mayo_estimator:
             loss0 = self.fun_loss(Y0, science_data)
 
             if w_pcent and Ractiv :
-                w_r  = w_r * loss0 / self.regul(X0)   # Auto hyperparameters
-                w_r2 = w_r2 * loss0 / self.regul2(X0, L0, self.mask)
+                w_r  = w_rp[0] * loss0 / self.regul(X0)   # Auto hyperparameters
+                w_r2 = w_rp[1] * loss0 / self.regul2(X0, L0, self.mask)
 
             R1_0 = Ractiv * w_r * self.regul(X0)
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
             loss0 += (R1_0 + R2_0)
 
         loss, R1, R2 = loss0, R1_0, R2_0
+        # ____________________________________
+        # Inside functions
 
         # Definition of minimizer step.
         def closure():
@@ -387,6 +394,35 @@ class mayo_estimator:
                 loss.backward()
             return loss
 
+        # Definition of regularization activation
+        def activation():
+            nonlocal  w_r, w_r2, optimizer
+            for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
+
+                # Second step : re-compute regul after performing a optimizer step
+                if activ_step == "AJUSTED": optimizer.step(closure)
+                Jloss = loss if activ_step == "ACTIVATED" else loss - (abs(R1) + abs(R2))
+
+                with torch.no_grad():
+                    if w_pcent:
+                        w_r  = w_rp[0] * Jloss / self.regul(Xk)
+                        w_r2 = w_rp[1] * Jloss / self.regul2(Xk, Lk, self.mask)
+                    if estimI:
+                        optimizer = optim.LBFGS([Lk, Xk, flux_k])
+                        flux_k.requires_grad = True
+                    else:
+                        optimizer = optim.LBFGS([Lk, Xk])
+
+                sub_iter = 0 if activ_step == "ACTIVATED" else 0.5
+                process_to_prints(activ_msg.format(activ_step, w_r, w_r2), sub_iter)
+
+        # Definition of print routines
+        def process_to_prints(extra_msg=None, sub_iter=0):
+            iter_msg = info_iter.format(k + sub_iter, loss, *loss_ratio(Ractiv, float(R1), float(R2), float(loss)))
+            if gif: print_iter(Lk, Xk, flux_k, k + sub_iter, stat_msg.split("\n", 4)[3] + '\n' + iter_msg, extra_msg, save)
+            if extra_msg: iter_msg += "\n" + extra_msg
+            if verbose: print(iter_msg)
+
         # If L_I is set to True, L variation intensity will be estimated
         if estimI :
             optimizer = optim.LBFGS([Lk, Xk, flux_k])
@@ -394,60 +430,37 @@ class mayo_estimator:
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
-        # ______________________________________
-        #  Minimizations Start
-
+        # Starting minization soon ...
         stat_msg = init_msg.format(self.name, *self.config, w_r, w_r2, str(maxiter))
-        print(stat_msg)
+        if verbose: print(stat_msg)
         start_time = datetime.now()
 
-        # -- Minimization Start ! -- #
+        # ____________________________________
+        # ------ Minimization Loop ! ------ #
+
         for k in range(maxiter):
 
-            # Save
+            # Save & prints
             loss_evo.append(loss)
-
-            # Prints
-            iter_msg = info_iter.format(k, loss, *loss_ratio(Ractiv, float(R1), float(R2), float(loss)))
-            if verbose: print(iter_msg)
-            if gif: print_iter(Lk, Xk, flux_k, k, stat_msg.split("\n", 4)[3] + '\n' + iter_msg, save)
+            self.last_iter = Lk, Xk if estimI else Lk, Xk, flux_k
+            process_to_prints()
 
             # Activation
-            if kactiv and k == kactiv:  # Only activate regul after few iterations
-                Ractiv = 1; mink = k+2
-                with torch.no_grad():
-                    if w_pcent:
-                        w_r  = w_r * loss / self.regul(Xk)
-                        w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.mask)
-                    if estimI:
-                        optimizer = optim.LBFGS([Lk, Xk, flux_k])
-                        flux_k.requires_grad = True
-                    else:
-                        optimizer = optim.LBFGS([Lk, Xk])
-                    print("REGUL HAVE BEEN ACTIVATED with w_r={:.2e} and w_r2={:.2e}".format(w_r, w_r2))
+            if kactiv and k == kactiv:
+                Ractiv = 1; mink = k + 2
+                activation()
 
-            if kdactiv and k == kdactiv: Ractiv = 0  # Shut down regul after few iterations
+            # Descactivation
+            if kdactiv and k == kdactiv: Ractiv = 0
 
             # -- MINIMIZER STEP -- #
             optimizer.step(closure)
 
             # Break point
             if k > mink and (abs(loss_evo[-2] - loss_evo[-1])) < gtol:
-
-                if not Ractiv and kactiv:
+                if not Ractiv and kactiv:  # If regul haven't been activated yet, continue with regul
                     Ractiv = 1; mink = k+2
-                    with torch.no_grad():
-                        if w_pcent:
-                            w_r  = w_r * loss / self.regul(Xk)
-                            w_r2 = w_r2 * loss / self.regul2(Xk, Lk, self.mask)
-                        if estimI:
-                            optimizer = optim.LBFGS([Lk, Xk, flux_k])
-                            flux_k.requires_grad = True
-                        else:
-                            optimizer = optim.LBFGS([Lk, Xk])
-                    print("Convergence reached : REGUL HAVE BEEN ACTIVATED "
-                          "\nwith w_r={:.2e} and w_r2={:.2e}".format(w_r, w_r2))
-
+                    activation()
                 else : break
 
         print("Done - Running time : " + str(datetime.now() - start_time))
@@ -461,7 +474,7 @@ class mayo_estimator:
         # Result dict
         res = {'state'   : optimizer.state,
                'x'       : (L_est, X_est),
-               'flux'     : flux,
+               'flux'    : flux,
                'loss_evo': loss_evo}
 
         self.res = res
