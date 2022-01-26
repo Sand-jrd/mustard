@@ -20,25 +20,25 @@ import torch
 
 # Choose where to get datas
 
-datadir = "./example-data/"
+# datadir = "./example-data/"
 # datadir = "../PDS70-neomayo/097.C-1001A/K1/"
-#datadir = "../PDS70-neomayo/095.C-0298B/H3/"
+datadir = "../Data_challenge/Test_PDS/test_unique/"
 
 Test_ini    = False
 Test_model  = False
 Test_regul  = False
 Test_mayo   = True
 i_have_time = False  # Extra outputs
-show_mask   = True
+show_mask   = False
 
-param = {'w_r'   : 0.07,
-        'w_r2'   : 0.05,
-        'gtol'   : 1e-10,
+param = {'w_r'   : 0.05,
+        'w_r2'   : 0,
+        'gtol'   : 1e-5,
         'kactiv' : 3,
         'kdactiv': None,
         'estimI' : True,
         'suffix' : None,
-        'maxiter': 15}
+        'maxiter': 20}
 
 # Badframes = (0, 35, 36)
 # Badframes = list(range(0, 672))
@@ -57,7 +57,7 @@ M = ellipse(model.frame_shape, 85, 50, 13) \
     - circle(model.frame_shape, 25)
 # M = circle(model.frame_shape, 60)
 
-R2_param = { 'Msk'    : None,
+R2_param = { 'Msk'  : None,
            'mode'   : "l1",
            'penaliz': "X",
            'invert' : False}
@@ -70,7 +70,7 @@ estimator.configR2(**R2_param)
 
 if Test_ini:
 
-    pca_arg = {'fwhm':4, 'asize':4, 'mask_size':4} # Argument for pca Annular
+    pca_arg = {'fwhm': 4, 'asize': 4, 'radius_int': 8}  # Argument for pca Annular
     L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", Imode="pca_annular", **pca_arg)
 
     # ___________________
@@ -143,7 +143,7 @@ if Test_regul :
 if Test_mayo:
 
     # L_est, X_est = estimator.estimate(**param,save=False, gif=True, verbose=True)
-    L_est, X_est, flux = estimator.estimate(**param, save=datadir, gif=True, verbose=True)
+    L_est, X_est, flux = estimator.estimate(**param, save=datadir, gif=False, verbose=True)
     
     # Complete results are stored in the estimator
     res = estimator.res 

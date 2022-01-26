@@ -68,7 +68,7 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='pca', **kwarg
             L_k[frame_id] = cube_der_rot - res.clip(min=0)
 
     elif Imode == "pca_annular":
-        print("Mode pca iterative")
+        print("Mode pca annular")
         res = pca_annular(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
