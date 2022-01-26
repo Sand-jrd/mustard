@@ -125,7 +125,7 @@ def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_c
 
 # %% Manage files
 
-def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
+def unpack_science_datadir(datadir: str, ispsf=False) -> (torch.Tensor, torch.Tensor):
     #  Import data
     json_file = glob.glob(datadir + "/*.json")
 
@@ -138,16 +138,16 @@ def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
         data_info = json.load(read_data_info)
 
         # Checks if all required keys are here
-    required_keys = ("cube", "angles")
+    required_keys = ("cube", "angles", "psf")if ispsf else ("cube", "angles")
     if not all([key in data_info.keys() for key in required_keys]):
         raise AssertionError("Data json info does not contained required keys")
 
     # Open fits
     angles = open_fits(datadir + "/" + data_info["angles"], verbose=False)
-
     science_data = open_fits(datadir + "/" + data_info["cube"], verbose=False)
+    psf = open_fits(datadir + "/" + data_info["psf"], verbose=False) if ispsf else None
 
-    return angles, science_data
+    return angles, science_data, psf
 
 
 def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: int, msg_box: str,

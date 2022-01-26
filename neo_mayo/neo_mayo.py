@@ -63,7 +63,7 @@ def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
 class mayo_estimator:
     """ Neo-mayo Algorithm main class  """
 
-    def __init__(self, datadir="./data", coro=6, pupil="edge", rot="fft", loss="mse",
+    def __init__(self, datadir="./data", coro=6, pupil="edge", ispsf=False, weighted_rot=True, rot="fft", loss="mse",
                  regul="smooth", Badframes=None, epsi=1e-3):
         """
         Initialisation of estimator object
@@ -80,6 +80,12 @@ class mayo_estimator:
             Size of the pupil.
             If pupil is set to "edge" : the pupil raduis will be half the size of the frame
             If pupil is set to None : there will be no pupil at all
+        ispsf : bool
+            if True, will perform deconvolution (i.e conv by psf inculded in forward model)
+            /!\ "psf" key must be added in json import file
+        weighted_rot : bool
+            if True, each frame will be weighted by the delta of rotation.
+            see neo-mayo thechnial details to know more.
         rot : str (WILL BE REMOVED IN THE FUTURE)
             Rotation mode :
             if 'fft' : roation using fourier transform
@@ -96,7 +102,8 @@ class mayo_estimator:
         """
 
         # -- Create model and define constants --
-        angles, science_data = unpack_science_datadir(datadir)
+        angles, science_data, psf =  unpack_science_datadir(datadir, ispsf)
+
         if Badframes is not None:
             science_data = np.delete(science_data, Badframes, 0)
             angles = np.delete(angles, Badframes, 0)
@@ -124,7 +131,7 @@ class mayo_estimator:
 
         # Convert to tensor
         self.science_data = self.coro * science_data
-        self.model = model_ADI(angles, self.coro, rot=rot)
+        self.model = model_ADI(angles, self.coro, psf, rot=rot)
 
         self.coro  = torch.from_numpy(self.coro).double()
         self.coroR = torch.from_numpy(self.coroR).double()
@@ -342,7 +349,6 @@ class mayo_estimator:
 
         # Regularization activation init setting
         if kactiv == "converg" : kactiv = maxiter  # If option converge, kactiv start when miniz end
-        if not kdactiv: kdactiv = None  # deactiv = 0 mean deactiv = None
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
         w_rp = w_r, w_r2 if w_pcent else  0, 0
 

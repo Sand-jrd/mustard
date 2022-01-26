@@ -11,7 +11,7 @@ ______________________________
 @author: sand-jrd
 """
 
-from vip_hci.pca import pca_fullfr
+from vip_hci.pca import pca_fullfr, pca_annular
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
 
@@ -62,6 +62,14 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='pca', **kwarg
     elif Imode == "pcait":
         print("Mode pca iterative")
         res = pca_it(cube, angle_list, verbose=False, **kwarg)
+
+        for frame_id in range(nb_frame):
+            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
+            L_k[frame_id] = cube_der_rot - res.clip(min=0)
+
+    elif Imode == "pca_annular":
+        print("Mode pca iterative")
+        res = pca_annular(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
             cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])

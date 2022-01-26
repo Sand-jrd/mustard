@@ -46,7 +46,7 @@ param = {'w_r'   : 0.07,
 Badframes = None
 
 # init the estimator and set variable
-estimator = mayo_estimator(datadir, rot="fft", loss="mse", regul="smooth", Badframes=Badframes)
+estimator = mayo_estimator(datadir, ispsf=False, Badframes=Badframes)
 shape = estimator.shape
 model = estimator.model
 angles, science_data = estimator.get_science_data()
@@ -70,7 +70,8 @@ estimator.configR2(**R2_param)
 
 if Test_ini:
 
-    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0")
+    pca_arg = {'fwhm':4, 'asize':4, 'mask_size':4} # Argument for pca Annular
+    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", Imode="pca_annular", **pca_arg)
 
     # ___________________
     # Show results
