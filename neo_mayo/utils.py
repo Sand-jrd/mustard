@@ -27,7 +27,7 @@ from os import mkdir
 from os.path import isdir
 from datetime import datetime
 
-BoxStyle  = {"boxstyle": 'square', "pad": 1.3, "mutation_scale": 0.01, "facecolor":'indigo', "alpha": 0.65}
+BoxStyle  = {"boxstyle": 'square', "pad": 1.3, "mutation_scale": 0.01, "facecolor": 'indigo', "alpha": 0.65}
 FontStyle = {"family": 'sans', "color": 'beige', "weight": 'normal', "size": 12}
 estimBox  = {"boxstyle": 'square', "facecolor": 'beige', "edgecolor": 'indigo', "alpha": 0.65}
 titleFont = {'color': 'indigo', "weight": "bold", "backgroundcolor": 'beige'}
@@ -151,10 +151,11 @@ def unpack_science_datadir(datadir: str, ispsf=False) -> (torch.Tensor, torch.Te
 
 
 def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: int, msg_box: str,
-               extra_msg: str or None, datadir: str or bool) -> None:
+               extra_msg: str or None, datadir: str or bool, coro  = 1) -> None:
 
-    L_np  = L.detach().numpy()[0, :, :]
-    X_np  = x.detach().numpy()[0, :, :]
+    L_np  = abs(L.detach().numpy()[0, :, :])
+    X_np  = abs(x.detach().numpy()[0, :, :])
+    coro  = coro.numpy()
     fluxnp = flux.detach().numpy()
 
     plt.ioff()
@@ -165,7 +166,9 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: 
 
     plt.suptitle("Iteration n°" + str(bfgs_iter))
 
-    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(L_np, 100), vmin=np.median(L_np) * 0.8)}
+    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(coro*L_np, 100),
+                                            vmin=np.percentile(L_np, 0) if np.percentile(L_np, 0) > 0
+                                                                        else np.percentile(X_np, 80))}
 
     if not bfgs_iter : title = "Initialisation"
     else : title = "Estimation of L and X"
@@ -175,12 +178,10 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: 
 
     plt.suptitle(title, **titleFont)
 
-    try :
-        plt.subplot(col, 2, 1), plt.imshow(np.abs(L_np), **args), plt.title("L (starlight) "), plt.colorbar()
-        plt.subplot(col, 2, 2), plt.imshow(np.abs(X_np), **args), plt.title("X (circonstellar light)"), plt.colorbar()
-    except Exception as e :
-        raise Exception("Something went wrong when printing outputs. It might be diverging\n"
-                        "I advise you to check last iteration and to retry with shutting down/reduce regularization")
+    plt.subplot(col, 2, 1), plt.imshow(coro * np.abs(L_np), **args)
+    plt.title("L (starlight) "), plt.colorbar()
+    plt.subplot(col, 2, 2), plt.imshow(coro * np.abs(X_np), **args)
+    plt.title("X (circonstellar light)"), plt.colorbar()
 
     if flux.requires_grad :
 

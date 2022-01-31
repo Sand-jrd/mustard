@@ -7,208 +7,91 @@ Tests of neo-mayo
 
 @author: sand-jrd
 """
-import matplotlib.pyplot as plt
+
 from neo_mayo import mayo_estimator
 from neo_mayo.utils import ellipse, circle
-from vip_hci.var import frame_filter_lowpass
-from vip_hci.preproc import frame_rotate
 import numpy as np
-import torch
+import matplotlib.pyplot as plt
+
+
+# What you want to do ?
+Do_ini    = True
+gif = True
 
 # %% -------------------------------------
-# Test mayo estimator initialisation
+# Test mayo estimator constructor
+# First step is to build our estimator
 
 # Choose where to get datas
-
 # datadir = "./example-data/"
 # datadir = "../PDS70-neomayo/097.C-1001A/K1/"
-datadir = "../Data_challenge/Test_PDS/test_unique/"
-
-Test_ini    = False
-Test_model  = False
-Test_regul  = False
-Test_mayo   = True
-i_have_time = False  # Extra outputs
-show_mask   = False
-
-param = {'w_r'   : 0.05,
-        'w_r2'   : 0,
-        'gtol'   : 1e-5,
-        'kactiv' : 3,
-        'kdactiv': None,
-        'estimI' : True,
-        'suffix' : None,
-        'maxiter': 20}
+datadir = "../Data_challenge/Test_PDS/test_one/"
 
 # Badframes = (0, 35, 36)
 # Badframes = list(range(0, 672))
 # for k, ii in enumerate(range(0, 672, 5)) : del Badframes[ii-k]
 Badframes = None
 
-# init the estimator and set variable
-estimator = mayo_estimator(datadir, ispsf=False, Badframes=Badframes)
-shape = estimator.shape
-model = estimator.model
-angles, science_data = estimator.get_science_data()
+# First step is to build our estimator with the datas
+coro = 8
+estimator = mayo_estimator(datadir, coro=coro, ispsf=False, weighted_rot=True,  Badframes=Badframes)
+
+# Configure your estimator parameters
+param = {'w_r'   : 0,         # Proportion of Regul over J
+        'w_r2'   : 0,         # Proportion of Regul2 over J
+        'w_way'  : (1, 1),    # You can either work with derotated_cube or rotated cube. Or both
+        'gtol'   : 1e-7,      # Gradient tolerence. Stop the estimation when the mean of gradient will hit the value
+        'kactiv' : 0,         # Iter before activate regul (i.e when to compute true weight base on w_r proportion)
+        'estimI' : True,      # Estimate frames flux is highly recommended !
+        'suffix' : "97iniNoR_both",  # Name of your simulation (this is optional)
+        'maxiter': 10}        # Maximum number of iterations (it converge fast tbh)
+
 # %% -------------------------------------
+# Configure an R2 regularization
 
-# init R2 regularization (optional)
-M = ellipse(model.frame_shape, 85, 50, 13) \
-    - circle(model.frame_shape, 25)
-# M = circle(model.frame_shape, 60)
+# Create a mask (you can use circle and ellipse from utils)
+shape = estimator.model.frame_shape
+#M = ellipse(shape, 85, 50, 13) \
+    #- circle(shape, 25)
+M = np.ones(shape) + circle(shape, 13)
 
-R2_param = { 'Msk'  : None,
+# Define your R2 parameters
+R2_param = { 'Msk'  : M,
            'mode'   : "l1",
            'penaliz': "X",
            'invert' : False}
 
+# Config R2
 estimator.configR2(**R2_param)
 
 # %% -------------------------------------
+# First the initialisation
 
-# %% Test Greed
+# You can pass agrument for pca as keyargs
+pca_arg = {'fwhm': 4, 'asize': 4, 'radius_int': coro}  # Exemple arguments for pca Annular
 
-if Test_ini:
+# Here we compute a pca as initialisation (best and more consistent so far is max_common)
+if   Do_ini :  L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", Imode="max_common")
 
-    pca_arg = {'fwhm': 4, 'asize': 4, 'radius_int': 8}  # Argument for pca Annular
-    L_ini, X_ini = estimator.initialisation(save=datadir + "/L0X0", Imode="pca_annular", **pca_arg)
+# You can also choose do start with L0 = mean(cube), X0 = mean(cube-L0)
+elif Do_ini is None :  pass
 
-    # ___________________
-    # Show results
-
-    plt.figure("Greed Results")
-    args = {"cmap": "magma", "vmax": np.percentile(L_ini, 98), "vmin": np.percentile(L_ini, 0)}
-
-    plt.subplot(1, 2, 1), plt.imshow(L_ini, **args), plt.title("L estimation from pcait init")
-    plt.subplot(1, 2, 2), plt.imshow(X_ini, **args), plt.title("X estimation from pcait init")
-
-else : L_ini, X_ini = estimator.initialisation(from_dir=datadir + "/L0X0")
+# I you have already done init and saved it, you can load L0.fits and X0.fits from folder
+else :  L_ini, X_ini = estimator.initialisation(from_dir=datadir + "/L0X0")
 
 # %% -------------------------------------
 # Test Forward model
 
-def test_model(L_ini, X_ini, flux=torch.ones(model.nb_frame-1)):
-    L_ini_tensor = torch.unsqueeze(torch.from_numpy(L_ini), 0)
-    X_ini_tensor = torch.unsqueeze(torch.from_numpy(X_ini), 0)
+if param['estimI'] :  L_est, X_est, flux = estimator.estimate(**param, save=datadir, gif=gif, verbose=True)
+else : L_est, X_est = estimator.estimate(**param, save=datadir, gif=gif, verbose=True)
 
-    Y_tensor = model.forward_ADI(L_ini_tensor, X_ini_tensor, flux)
-    Y = Y_tensor.detach().numpy()[:, 0, :, :]
-    return Y, L_ini_tensor, X_ini_tensor
+# Complete results are stored in the estimator
+res = estimator.res
 
-
-if Test_model:
-
-    Y, _, _ = test_model(L_ini, X_ini)
-
-    # ___________________
-    # Show results
-
-    plt.figure("Forward model")
-    args = {"cmap": "magma", "vmax": np.percentile(science_data, 98), "vmin": np.percentile(science_data, 0)}
-    frame_ID = 1
-
-    win_siz = 4
-    frame_pas = model.nb_frame // (win_siz // 2 * (win_siz - 1))
-    for ii in range(win_siz // 2 * (win_siz - 1)):
-        plt.subplot(win_siz, win_siz, 2 * ii + 1), plt.imshow(Y[ii * frame_pas], **args), plt.title(
-            "Y from forward model, img°" + str(ii))
-        plt.subplot(win_siz, win_siz, 2 * ii + 2), plt.imshow(science_data[ii * frame_pas], **args), plt.title(
-            "Real Y from science data, img°" + str(ii))
-
-    plt.subplot(win_siz, 2, 2 * win_siz - 1), plt.imshow(L_ini, **args), plt.title("Given L")
-    plt.subplot(win_siz, 2, 2 * win_siz), plt.imshow(X_ini, **args), plt.title("Given X")
-
-
-# %% -------------------------------------
-# Test Estimations
-
-
-if Test_regul :
-
-    from neo_mayo.algo import sobel_tensor_conv
-
-    X_ini_tensor = torch.unsqueeze(torch.from_numpy(X_ini), 0).double()
-    X_tensor = sobel_tensor_conv(X_ini_tensor)
-    X_r = X_tensor.detach().numpy()[0, 0, :, :]
-
-    # ___________________
-    # Show results
-
-    plt.figure("Regul")
-    args = {"cmap": "magma", "vmax": np.percentile(X_r, 100), "vmin": np.percentile(X_r, 0)}
-
-    plt.imshow(X_r, **args), plt.title("Loss per pixels; square sum = {:.2e}".format(torch.sum(X_tensor**2)))
-
-
-if Test_mayo:
-
-    # L_est, X_est = estimator.estimate(**param,save=False, gif=True, verbose=True)
-    L_est, X_est, flux = estimator.estimate(**param, save=datadir, gif=False, verbose=True)
-    
-    # Complete results are stored in the estimator
-    res = estimator.res 
-
-    # ___________________
-    # Show results
-
-    plt.figure("Loss evolutions : ")
-    ex_frame = 5
-    args = {"cmap": "magma", "vmax": np.percentile(science_data[ex_frame], 98), "vmin": np.percentile(science_data[ex_frame], 0)}
-
-    Y_ini, L_t_ini, X_t_ini = test_model(L_ini, X_ini, flux)
-    Y_est, L_t_est, X_t_est = test_model(L_est, X_est, flux)
-
-    plt.subplot(2, 3, 1), plt.imshow(Y_ini[ex_frame], **args), plt.title("Y from ini, frame " + str(ex_frame))
-    plt.subplot(2, 3, 2), plt.imshow(Y_est[ex_frame], **args), plt.title("Y from estimation, frame " + str(ex_frame))
-    plt.subplot(2, 3, 3), plt.imshow(science_data[ex_frame], **args), plt.title("Y from science data, frame " + str(ex_frame))
-    plt.subplot(2, 2, 3), plt.imshow(abs(science_data[ex_frame] - Y_ini[ex_frame]), **args), plt.title("Diff between Y_ini/Y_science; loos ={:.2e}".format(res['loss_evo'][0]))
-    plt.subplot(2, 2, 4), plt.imshow(abs(science_data[ex_frame] - Y_est[ex_frame]), **args), plt.title("Diff between Y_est/Y_science; loss ={:.2e}".format(res['loss_evo'][-1]))
-    plt.savefig(datadir + ".png", pad_inches=0.5)
-
-    # ___________________
-    plt.figure("compare")
-    plt.subplot(3, 2, 1), plt.imshow(X_est, **args), plt.title("Estimated X ")
-    plt.subplot(3, 2, 2), plt.imshow(X_ini, **args), plt.title("X with iterative PCA ")
-    plt.subplot(3, 2, 3), plt.imshow(L_est, **args), plt.title("Estimated L ")
-    plt.subplot(3, 2, 4), plt.imshow(L_ini, **args), plt.title("L with iterative PCA ")
-    plt.subplot(3, 1, 3), plt.imshow(science_data[ex_frame], **args), plt.title("Science data")
-    plt.savefig(datadir + ".png", pad_inches=0.5)
-
-
-if show_mask :
-    args = {"cmap": "magma", "vmax": np.percentile(science_data[0], 98)}
-
-    plt.figure("the mask")
-    if R2_param["invert"] : M = (1-M)
-    plt.subplot(231), plt.imshow(M, **args)          , plt.title("Mask")
-    plt.subplot(232), plt.imshow(L_est, **args)      , plt.title("L")
-    plt.subplot(233), plt.imshow(X_est, **args)      , plt.title("X")
-    plt.subplot(235), plt.imshow((1-M)*L_est, **args), plt.title("(1-Mask) * L")
-    plt.subplot(236), plt.imshow(M*X_est, **args)    , plt.title("Mask * X")
-
-
-
-if i_have_time :
-
-    plt.figure("Test mayo : ")
-    args = {"cmap": "magma", "vmax": np.percentile(L_ini, 98)}
-
-    plt.subplot(2, 3, 1), plt.imshow(L_est, **args), plt.title("L estimation")
-    plt.subplot(2, 3, 4), plt.imshow(X_est, **args), plt.title("X estimation")
-    plt.subplot(2, 3, 2), plt.imshow(L_ini, **args), plt.title("L estimation from pcait init")
-    plt.subplot(2, 3, 5), plt.imshow(X_ini, **args), plt.title("X estimation from pcait init")
-    plt.subplot(2, 3, 3), plt.imshow(abs(L_ini - L_est), **args), plt.title("Diff L")
-    plt.subplot(2, 3, 6), plt.imshow(abs(X_ini - X_est), **args), plt.title("Diff X")
-
-    # ___________________
-    plt.figure("Remove noise")
-    args = {"cmap": "magma", "vmax": np.percentile(science_data, 98), "vmin": np.percentile(science_data, 0)}
-
-    derot_Xs_est = np.zeros(science_data.shape)
-    for frame in range(model.nb_frame):
-        derot_Xs_est[frame] = frame_rotate(science_data[frame]-L_est, -angles[frame])
-
-    plt.subplot(2, 2, 1), plt.imshow(abs(X_est), **args), plt.title("Estimated X ")
-    plt.subplot(2, 2, 2), plt.imshow(science_data[0]-L_est, **args), plt.title("Data - L ")
-    plt.subplot(2, 2, 3), plt.imshow(frame_filter_lowpass(science_data[0]-L_est, kernel_sz=3), **args), plt.title("Filtered (Data - L)")
-    plt.subplot(2, 2, 4), plt.imshow(np.mean(derot_Xs_est, axis=0), **args), plt.title("Mean (Data - L)  ")
+# The estimator store the last iter as tensor. Hence you can access all sort of things as
+# Last value of gradient, last residual per frames, loss evolution...
+# everything you need to see if it went as planned
+Lk, Xk, flux_k = estimator.last_iter
+grad = Xk.grad.data[0].detach().numpy()
+reconstructed_cube = estimator.model.forward_ADI(Lk, Xk, flux_k).detach().numpy()
+residual_cube = estimator.science_data - reconstructed_cube

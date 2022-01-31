@@ -12,6 +12,7 @@ ______________________________
 """
 
 from vip_hci.pca import pca_fullfr, pca_annular
+from vip_hci.preproc import cube_derotate
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
 
@@ -56,24 +57,45 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='pca', **kwarg
         res = pca_fullfr.pca(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
-            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
-            L_k[frame_id] = cube_der_rot - res.clip(min=0)
+            frame_id_rot = frame_rotate(res, angle_list[frame_id])
+            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
 
     elif Imode == "pcait":
         print("Mode pca iterative")
         res = pca_it(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
-            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
-            L_k[frame_id] = cube_der_rot - res.clip(min=0)
+            frame_id_rot = frame_rotate(res, angle_list[frame_id])
+            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
 
     elif Imode == "pca_annular":
         print("Mode pca annular")
         res = pca_annular(cube, angle_list, verbose=False, **kwarg)
 
         for frame_id in range(nb_frame):
-            cube_der_rot = frame_rotate(cube[frame_id], -angle_list[frame_id])
-            L_k[frame_id] = cube_der_rot - res.clip(min=0)
+            frame_id_rot = frame_rotate(res, angle_list[frame_id])
+            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
+
+    elif Imode == "max_common":
+        print("Mode maximum in common")
+        science_data_derot = cube_derotate(cube, angle_list)
+        science_data_derot = science_data_derot - np.mean(science_data_derot)
+        science_data_derot[science_data_derot>np.percentile(science_data_derot, 98)] = 0
+        science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
+        X0 = torch.zeros(cube[0].shape); X0.requires_grad = True
+        optim = torch.optim.LBFGS([X0])
+
+        def closure():
+            optim.zero_grad()
+            loss = torch.sum((science_data_derot - X0)**2)
+            loss.backward()
+            return loss
+        for _ in range(5) : optim.step(closure)
+        res = X0.detach().numpy().clip(0)
+
+        for frame_id in range(nb_frame):
+            frame_id_rot = frame_rotate(res, angle_list[frame_id])
+            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
 
     else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'pca','pcait'}")
 
@@ -257,3 +279,8 @@ def tensor_fft_shear(arr, arr_ori, c, ax):
     s_x = tf.fftshift(s_x)
 
     return s_x
+
+
+def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.abs(torch.fft.ifftshift(torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) *
+                                                         torch.fft.fftshift(torch.fft.fft2(y)))))

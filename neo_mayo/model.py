@@ -13,13 +13,7 @@ ______________________________
 import numpy
 import numpy as np
 import torch
-from neo_mayo.algo import tensor_rotate_fft
-from torchvision.transforms.functional import rotate, InterpolationMode
-
-import warnings
-
-warnings.simplefilter("ignore", UserWarning)
-
+from neo_mayo.algo import tensor_rotate_fft, tensor_conv
 
 # %% Forward ADI model :
 
@@ -32,7 +26,7 @@ class model_ADI:
              x = circumstellar flux
      """
 
-    def __init__(self, rot_angles: np.array, coro: np.array, psf: None or np.array, rot="fft"):
+    def __init__(self, rot_angles: np.array, coro: np.array, psf: None or np.array):
 
         # -- Constants
         # Sizes
@@ -52,35 +46,40 @@ class model_ADI:
         # Coro mask
         self.coro = torch.unsqueeze(torch.from_numpy(coro), 0)
 
-        # -- Functions
-
-        if rot == "fft":
-            self.rot = tensor_rotate_fft
-            self.rot_args = {}
-
-        else:  # TODO :  remove
-            self.rot = rotate  # Torchvison rotation
-            self.rot_args = {'interpolation': InterpolationMode.BILINEAR}
-
-        # TODO :  fction in utils
-        self.conv = lambda x, y, **kwargs: torch.abs(torch.fft.ifftshift(
-            torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) * torch.fft.fftshift(torch.fft.fft2(y)))))
 
     def forward_ADI(self, L: torch.Tensor, x: torch.Tensor, flux=None) -> torch.Tensor:
-        """ Process forward model  : Y =  ( flux * L + R(x)) )  """
+        """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
         if flux is None: flux = torch.ones(self.nb_frame - 1)
 
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
         # First image. No intensity vector
-        Rx = self.rot(x.abs(), float(self.rot_angles[0]), **self.rot_args)
-        Y[0] = L + self.coro * Rx
+        Rx = tensor_rotate_fft(x.abs(), float(self.rot_angles[0]))
+        Y[0] = L.abs() + self.coro * Rx.abs()
 
         for frame_id in range(1, self.nb_frame):
-            Rx = self.rot(x.abs(), float(self.rot_angles[frame_id]), **self.rot_args)
-            if self.psf is not None: Rx = self.conv(Rx, self.psf)
-            Y[frame_id] = flux[frame_id - 1] * L + self.coro * Rx
+            Rx = tensor_rotate_fft(x.abs(), float(self.rot_angles[frame_id]))
+            if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
+            Y[frame_id] = flux[frame_id - 1] * L.abs() + self.coro * Rx.abs()
+
+        return Y
+
+    def forward_ADI_reverse(self, L: torch.Tensor, x: torch.Tensor, flux=None) -> torch.Tensor:
+        """ Process forward model  : Y =  ( flux * R(L) + x) )  """
+
+        if flux is None: flux = torch.ones(self.nb_frame - 1)
+
+        Y = torch.zeros((self.nb_frame,) + L.shape).double()
+
+        # First image. No intensity vector
+        Rl = tensor_rotate_fft(L.abs(), -float(self.rot_angles[0]))
+        Y[0] = Rl + self.coro * x.abs()
+
+        for frame_id in range(1, self.nb_frame):
+            RL = tensor_rotate_fft(L.abs(), -float(self.rot_angles[frame_id]))
+            if self.psf is not None: x = tensor_conv(x.abs(), self.psf)
+            Y[frame_id] = flux[frame_id - 1] * RL + self.coro * x.abs()
 
         return Y
 
