@@ -153,7 +153,7 @@ class mayo_estimator:
         self.config = [regul, None, 'With' if ispsf else 'No', 'with' if weighted_rot else 'no']
         self.res = None; self.last_iter = None; self.first_iter = None; self.final_estim = None  # init results vars
 
-    def initialisation(self, from_dir=None, save=None, Imode="pca",  **kwargs):
+    def initialisation(self, from_dir=None, save=None, Imode="max_common",  **kwargs):
         """ Init L0 (starlight) and X0 (circonstellar) with a PCA
          
          Parameters
@@ -362,7 +362,7 @@ class mayo_estimator:
 
         # ______________________________________
         # Define constantes and convert arry to tensor
-
+        self.science_data = (self.science_data - np.median(self.science_data)).clip(0)
         science_data_derot = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()

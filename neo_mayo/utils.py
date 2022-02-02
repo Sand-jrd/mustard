@@ -165,10 +165,9 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: 
     plt.subplots(col, 2, figsize=(16, 9), gridspec_kw={'height_ratios': ratios})
 
     plt.suptitle("Iteration n°" + str(bfgs_iter))
-
-    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(coro*L_np, 100),
-                                            vmin=np.percentile(L_np, 0) if np.percentile(L_np, 0) > 0
-                                                                        else np.percentile(X_np, 80))}
+    vmin = np.percentile(L_np, 0) if np.percentile(L_np, 0) > 0 else np.percentile(X_np, 80)
+    vmin = 1e-10 if vmin == 0 else vmin
+    args = {"cmap": "gnuplot2", "norm": LogNorm(vmax=np.percentile(coro*L_np, 100), vmin=vmin)}
 
     if not bfgs_iter : title = "Initialisation"
     else : title = "Estimation of L and X"
