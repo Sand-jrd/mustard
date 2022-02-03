@@ -23,9 +23,9 @@ gif = True
 # First step is to build our estimator
 
 # Choose where to get datas
-# datadir = "./example-data/"
+datadir = "./example-data/"
 # datadir = "../PDS70-neomayo/097.C-1001A/K1/"
-datadir = "../Data_challenge/Test_PDS/test_one/"
+# datadir = "../Data_challenge/Test_PDS/test_one/"
 
 # Badframes = (0, 35, 36)
 # Badframes = list(range(0, 672))

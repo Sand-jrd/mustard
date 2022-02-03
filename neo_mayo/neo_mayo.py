@@ -201,7 +201,7 @@ class mayo_estimator:
                 if not isdir(save): mkdir(save)
                 print("Save init from in " + save + "...")
                 write_fits(save + "/L0.fits", L0, verbose=False)
-                write_fits(save + "/X0.fits", X0, verbose=False)
+                write_fits(save + "/X0.fits", self.coro.numpy() * X0, verbose=False)
 
         # -- Define constantes
         self.L0x0 = (L0, X0)
@@ -252,7 +252,7 @@ class mayo_estimator:
                 raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
 
         if Msk is not None and mode != 'mask' :
-            warnings.warn("You give a mask but didn't use 'mask' option.", UserWarning, )
+            warnings.warn("You give a mask but didn't use 'mask' option.", UserWarning)
 
         penaliz = penaliz.capitalize()
         rM = self.coroR  # corono mask for regul
@@ -288,7 +288,7 @@ class mayo_estimator:
         R2_name += " inverted" if invert else ""
         self.config[1] = R2_name
 
-    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, maxiter=10, w_way=(0, 1),
+    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, med_sub=False, maxiter=10, w_way=(0, 1),
                  gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
         """ Resole the minimization of probleme neo-mayo
             The first step with pca aim to find a good initialisation
@@ -362,7 +362,13 @@ class mayo_estimator:
 
         # ______________________________________
         # Define constantes and convert arry to tensor
-        self.science_data = (self.science_data - np.median(self.science_data)).clip(0)
+
+        # Med sub
+        if med_sub :
+            meds = np.median(self.coro * self.science_data, (1, 2))
+            for frame in range(self.nb_frames) :
+                self.science_data[frame] = (self.science_data[frame] - meds[frame]).clip(0)
+
         science_data_derot = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()

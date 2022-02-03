@@ -16,6 +16,8 @@ from vip_hci.preproc import cube_derotate
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
 
+from vip_hci.fits import write_fits
+
 import torch
 from torch.nn.functional import conv2d
 import torch.fft as tf
@@ -79,33 +81,14 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='max_common', 
     elif Imode == "max_common":
         print("Mode maximum in common")
 
-        cut  =  kwarg['cut'] if 'cut' in kwarg.keys() else 99
-        iter =  kwarg['iter'] if 'iter' in kwarg.keys() else 1
-
         science_data_derot = cube_derotate(cube, angle_list)
-        science_data_derot = science_data_derot - np.mean(science_data_derot)
-        science_data_derot[science_data_derot>np.percentile(science_data_derot, cut)] = 0
-        science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
-        X0 = torch.zeros(cube[0].shape); X0.requires_grad = True
-        optim = torch.optim.LBFGS([X0])
-
-        def closure():
-            optim.zero_grad()
-            loss = torch.sum((science_data_derot - X0)**2)
-            loss.backward()
-            return loss
-
-        for _ in range(iter) : optim.step(closure)
-        res = X0.detach().numpy().clip(0)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
+        max_com_derot = np.min(science_data_derot, 0)
+        starlight = np.min(cube, 0)
 
     else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'max_common',"
                                          "'pca_annular','pca','pcait'}")
 
-    return np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
+    return starlight, max_com_derot
 
 
 # %% Operator on tensors
