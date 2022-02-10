@@ -98,7 +98,9 @@ class mayo_estimator:
         """
 
         # -- Create model and define constants --
-        angles, science_data, psf =  unpack_science_datadir(datadir, ispsf)
+        angles, science_data, psf =  unpack_science_datadir(datadir)
+        if ispsf and psf == None : raise Exception("You ask to include deconvolution but "
+                                                   "no psf was provided in the json importation infos")
 
         if Badframes is not None:
             science_data = np.delete(science_data, Badframes, 0)
@@ -128,7 +130,7 @@ class mayo_estimator:
         # Convert to tensor
         rot_angles = normlizangle(angles)
         self.science_data = science_data
-        self.model = model_ADI(rot_angles, self.coro, psf)
+        self.model = model_ADI(rot_angles, self.coro, psf if ispsf else None)
 
         # Compute ponderation weight by rotations
         ang_weight = compute_rot_weight(rot_angles) if weighted_rot else np.ones(self.nb_frames)
@@ -140,10 +142,16 @@ class mayo_estimator:
         # -- Define our minimization problem
 
         if regul == "smooth_with_edges":
-            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X) ** 2 - epsi ** 2)
-        elif regul == "smooth":
+            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) +\
+                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi  ** 2)
+        elif regul == "smooth" :
             self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2) +\
                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
+        elif regul == "peak_preservation" :
+                self.xmax = 1
+                self.fpeak = lambda X: torch.log(self.xmax - X/self.xmax)
+                self.regul = lambda X: torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='y') ** 2) + \
+                                       torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
         elif regul == "l1":
             self.regul = lambda X: torch.sum(self.coroR * torch.abs(X))
 
@@ -193,15 +201,19 @@ class mayo_estimator:
             print(sep + "\nInitialisation  ...")
 
             L0, X0 = init_estimate(self.science_data, self.model.rot_angles, Imode=Imode , **kwargs)
-            #X0 = gaussian_filter(X0, sigma=1)
 
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
             if save:
                 if not isdir(save): mkdir(save)
                 print("Save init from in " + save + "...")
+
+                nice_X0 = self.coro.numpy() * X0
+                nice_X0 = (nice_X0 - np.median(nice_X0)).clip(0)
+
                 write_fits(save + "/L0.fits", L0, verbose=False)
-                write_fits(save + "/X0.fits", self.coro.numpy() * X0, verbose=False)
+                write_fits(save + "/X0.fits", X0, verbose=False)
+                write_fits(save + "/nice_X0.fits", self.coro.numpy()*nice_X0, verbose=False)
 
         # -- Define constantes
         self.L0x0 = (L0, X0)
@@ -352,6 +364,9 @@ class mayo_estimator:
             print("You didn't run initialization : start with L0=mean(cube), X0=mean(cube-L0)")
             self.L0x0 = abs(np.mean(self.science_data, 0)),\
                         np.mean((self.science_data-np.mean(self.science_data, 0)).clip(min=0), 0)
+
+        L0, X0 = self.L0x0[0].clip(min=0), self.L0x0[1].clip(min=0)
+
         mink  = 2  # Min number of iter before convergence
         loss_evo = []; grad_evo = []
 
@@ -368,14 +383,13 @@ class mayo_estimator:
             meds = np.median(self.coro * self.science_data, (1, 2))
             for frame in range(self.nb_frames) :
                 self.science_data[frame] = (self.science_data[frame] - meds[frame]).clip(0)
+            L0, X0 = (L0 - np.median(L0)).clip(0), (X0 - np.median(X0)).clip(0)
 
+        if self.config[0] == "peak_preservation" : self.xmax = np.max(X0)
+
+        science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
         science_data_derot = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
-        science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-        science_data.requires_grad = False; science_data_derot.requires_grad = False
-
-
-        L0, X0 = self.L0x0
 
         L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
         X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()

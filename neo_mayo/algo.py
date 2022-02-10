@@ -81,14 +81,20 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='max_common', 
     elif Imode == "max_common":
         print("Mode maximum in common")
 
+
         science_data_derot = cube_derotate(cube, angle_list)
-        max_com_derot = np.min(science_data_derot, 0)
-        starlight = np.min(cube, 0)
+        science_data_derot = science_data_derot
+
+        res = np.min(science_data_derot, 0)
+
+        for frame_id in range(nb_frame):
+            frame_id_rot = frame_rotate(res, angle_list[frame_id])
+            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
 
     else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'max_common',"
                                          "'pca_annular','pca','pcait'}")
 
-    return starlight, max_com_derot
+    return  np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
 
 
 # %% Operator on tensors
