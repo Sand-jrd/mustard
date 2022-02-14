@@ -16,8 +16,6 @@ from vip_hci.preproc import cube_derotate
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
 
-from vip_hci.fits import write_fits
-
 import torch
 from torch.nn.functional import conv2d
 import torch.fft as tf
@@ -81,8 +79,7 @@ def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='max_common', 
     elif Imode == "max_common":
         print("Mode maximum in common")
 
-
-        science_data_derot = cube_derotate(cube, angle_list)
+        science_data_derot = cube_derotate(cube, list(angle_list))
         science_data_derot = science_data_derot
 
         res = np.min(science_data_derot, 0)

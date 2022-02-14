@@ -15,8 +15,8 @@ import numpy as np
 import torch
 from neo_mayo.algo import tensor_rotate_fft, tensor_conv
 
-# %% Forward ADI model :
 
+# %% Forward ADI model :
 class model_ADI:
     """ Forward models as presented in mayo
         
@@ -45,7 +45,6 @@ class model_ADI:
 
         # Coro mask
         self.coro = torch.unsqueeze(torch.from_numpy(coro), 0)
-
 
     def forward_ADI(self, L: torch.Tensor, x: torch.Tensor, flux=None) -> torch.Tensor:
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
@@ -82,7 +81,6 @@ class model_ADI:
             Y[frame_id] = flux[frame_id - 1] * RL + self.coro * x.abs()
 
         return Y
-
 
 
 def pad_psf(M: numpy.array, shape) -> numpy.array:

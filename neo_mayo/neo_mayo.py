@@ -15,7 +15,7 @@ ______________________________
 # For file management
 from neo_mayo.utils import unpack_science_datadir
 from vip_hci.fits import open_fits, write_fits
-from vip_hci.preproc import cube_derotate
+from vip_hci.preproc import cube_derotate, frame_rotate
 
 from os import mkdir
 from os.path import isdir
@@ -66,7 +66,7 @@ class mayo_estimator:
     """ Neo-mayo Algorithm main class  """
 
     def __init__(self, datadir="./data", coro=6, pupil="edge", ispsf=False, weighted_rot=True, regul="smooth",
-                 Badframes=None, epsi=1e-3):
+                 Badframes=None):
         """
         Initialisation of estimator object
 
@@ -93,13 +93,11 @@ class mayo_estimator:
             The R1 will be applied on X (disk and planet contribution)
         Badframes : tuple or list or None
             Bad frames that you will not be taken into account
-        epsi : (WILL MAYBE BE REMOVE BECAUSE USELESS, IT IS NEVER SHAPE LOL) float
-            'smooth_with_edges' parameters
         """
 
         # -- Create model and define constants --
         angles, science_data, psf =  unpack_science_datadir(datadir)
-        if ispsf and psf == None : raise Exception("You ask to include deconvolution but "
+        if ispsf and psf is None : raise Exception("You ask to include deconvolution but "
                                                    "no psf was provided in the json importation infos")
 
         if Badframes is not None:
@@ -132,33 +130,18 @@ class mayo_estimator:
         self.science_data = science_data
         self.model = model_ADI(rot_angles, self.coro, psf if ispsf else None)
 
-        # Compute ponderation weight by rotations
+        # Compute weights for small angles bias
         ang_weight = compute_rot_weight(rot_angles) if weighted_rot else np.ones(self.nb_frames)
         self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frames, 1, 1, 1))).double()
 
         self.coro  = torch.from_numpy(self.coro).double()
         self.coroR = torch.from_numpy(self.coroR).double()
 
-        # -- Define our minimization problem
-
-        if regul == "smooth_with_edges":
-            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) +\
-                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi  ** 2)
-        elif regul == "smooth" :
-            self.regul = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2) +\
-                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
-        elif regul == "peak_preservation" :
-                self.xmax = 1
-                self.fpeak = lambda X: torch.log(self.xmax - X/self.xmax)
-                self.regul = lambda X: torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='y') ** 2) + \
-                                       torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
-        elif regul == "l1":
-            self.regul = lambda X: torch.sum(self.coroR * torch.abs(X))
-
-        self.regul2 = lambda X, L, M:  0
-
-        # Config list : [R1, R2, ispsf, is wieghted_rot]
+        # -- Configure regularization (can be change later, this is defaults parameters)
         self.config = [regul, None, 'With' if ispsf else 'No', 'with' if weighted_rot else 'no']
+        self.configR2(Msk=None, mode="l1", penaliz="X")
+        self.configR1(mode=regul)
+
         self.res = None; self.last_iter = None; self.first_iter = None; self.final_estim = None  # init results vars
 
     def initialisation(self, from_dir=None, save=None, Imode="max_common",  **kwargs):
@@ -188,7 +171,7 @@ class mayo_estimator:
              and circunstlellar contributions (X) 
          
         """
-
+        warnings.warn(DeprecationWarning("this will be removed in the future !!!!"))
         if from_dir:
             print("Get init from pre-processed datas...")
             L0 = open_fits(from_dir + "/L0.fits", verbose=False)
@@ -219,6 +202,27 @@ class mayo_estimator:
         self.L0x0 = (L0, X0)
 
         return L0, X0
+
+    def configR1(self, mode: str, smoothL = True, p_L = 1, epsi = 1e-7):
+        """ Configuration of first regularization. (smooth-like)"""
+
+        if mode == "smooth_with_edges":
+            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) +\
+                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi  ** 2)
+        elif mode == "smooth" :
+            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2) +\
+                                   torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
+        elif mode == "peak_preservation" :
+            self.xmax = 1
+            self.fpeak = lambda X: torch.log(self.xmax - X/self.xmax)
+            self.smooth = lambda X: torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='y') ** 2) + \
+                                   torch.sum(self.fpeak(X) * self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
+        elif mode == "l1":
+            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+
+        self.p_L = p_L
+        if smoothL : self.regul = lambda X, L: self.smooth(X) + self.p_L*self.smooth(L)
+        else       : self.regul = lambda X, L: self.smooth(X)
 
     def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False):
         """ Configuration for Second regularization.
@@ -264,7 +268,7 @@ class mayo_estimator:
                 raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
 
         if Msk is not None and mode != 'mask' :
-            warnings.warn("You give a mask but didn't use 'mask' option.", UserWarning)
+            warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
 
         penaliz = penaliz.capitalize()
         rM = self.coroR  # corono mask for regul
@@ -324,8 +328,16 @@ class mayo_estimator:
             If True, estimate flux variation between each frame of data-science cube I_ks.
             ADI model will be written as I_k*L + R(X) = Y_k
 
+        med_sub : bool
+            if True, will proceed to a median subtraction (recommended)
+
         maxiter : int
             Maximum number of optimization steps
+
+        w_way : tuple ints
+            if (1,0) : ADI model constructed with the cube and rotate R (direct way)
+            if (0,1) : ADI model constructed with the derotated cube and rotate L (reverse way)
+            if (1,1) : will do both
 
         gtol : float
             Gradient tolerance; Set the break point of minimization.
@@ -360,13 +372,6 @@ class mayo_estimator:
          
         """
 
-        if self.L0x0 is None:
-            print("You didn't run initialization : start with L0=mean(cube), X0=mean(cube-L0)")
-            self.L0x0 = abs(np.mean(self.science_data, 0)),\
-                        np.mean((self.science_data-np.mean(self.science_data, 0)).clip(min=0), 0)
-
-        L0, X0 = self.L0x0[0].clip(min=0), self.L0x0[1].clip(min=0)
-
         mink  = 2  # Min number of iter before convergence
         loss_evo = []; grad_evo = []
 
@@ -383,13 +388,30 @@ class mayo_estimator:
             meds = np.median(self.coro * self.science_data, (1, 2))
             for frame in range(self.nb_frames) :
                 self.science_data[frame] = (self.science_data[frame] - meds[frame]).clip(0)
-            L0, X0 = (L0 - np.median(L0)).clip(0), (X0 - np.median(X0)).clip(0)
-
-        if self.config[0] == "peak_preservation" : self.xmax = np.max(X0)
 
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-        science_data_derot = cube_derotate(self.science_data, self.model.rot_angles)
-        science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot), 1).double()
+        science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+        science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+
+        # __________________________________
+        # Initialisation with max common
+
+        if self.L0x0 is not None:
+            warnings.warn(DeprecationWarning("Use of initalization other than max-common is not recommended."))
+        else :
+            res = np.min(science_data_derot_np, 0)
+            L_fr = np.zeros(self.science_data.shape)
+
+            for frame_id in range(self.nb_frames):
+                frame_id_rot = frame_rotate(res, self.model.rot_angles[frame_id])
+                L_fr[frame_id] = self.science_data[frame_id] - (frame_id_rot.clip(min=0))
+            self.L0x0 = np.median(L_fr, axis=0).clip(min=0), res.clip(min=0)
+
+        L0, X0 = self.L0x0[0].clip(min=0), self.L0x0[1].clip(min=0)
+        if self.config[0] == "peak_preservation" : self.xmax = np.max(X0)
+
+        # __________________________________
+        # Initialisation with max common
 
         L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
         X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
@@ -411,10 +433,10 @@ class mayo_estimator:
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
             if w_pcent and Ractiv :
-                w_r  = w_rp[0] * loss0 / self.regul(X0)   # Auto hyperparameters
+                w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
                 w_r2 = w_rp[1] * loss0 / self.regul2(X0, L0, self.mask)
 
-            R1_0 = Ractiv * w_r * self.regul(X0)
+            R1_0 = Ractiv * w_r * self.regul(X0, L0)
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
             loss0 += (R1_0 + R2_0)
 
@@ -433,7 +455,7 @@ class mayo_estimator:
             Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k) if w_way[1] else 0
 
             # Compute regularization(s)
-            R1 = Ractiv * w_r * self.regul(Xk)
+            R1 = Ractiv * w_r * self.regul(Xk, Lk)
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
 
             # Compute loss and local gradients
@@ -454,7 +476,7 @@ class mayo_estimator:
 
                 with torch.no_grad():
                     if w_pcent:
-                        w_r  = w_rp[0] * loss / self.regul(Xk)
+                        w_r  = w_rp[0] * loss / self.regul(Xk, Lk)
                         w_r2 = w_rp[1] * loss / self.regul2(Xk, Lk, self.mask)
                 if estimI:
                     optimizer = optim.LBFGS([Lk, Xk, flux_k])
@@ -513,7 +535,7 @@ class mayo_estimator:
                 loss_evo.append(loss)
                 grad_evo.append(torch.mean(abs(Lk.grad.data)) + torch.mean(abs(Xk.grad.data)))
                 self.last_iter = (Lk, Xk, flux_k) if estimI else (Lk, Xk)
-                if k==1 : self.first_iter = (Lk, Xk, flux_k) if estimI else (Lk, Xk)
+                if k == 1 : self.first_iter = (Lk, Xk, flux_k) if estimI else (Lk, Xk)
                 process_to_prints()
 
                 # Break point (based on gtol)
@@ -560,10 +582,29 @@ class mayo_estimator:
         if estimI: return L_est, X_est, flux
         else     : return L_est, X_est
 
-
     def get_science_data(self):
         """Return input cube and angles"""
         return self.model.rot_angles, self.science_data
+
+    def get_initialisation(self, save=None):
+        """Return input cube and angles"""
+
+        if self.L0x0 is None : raise "No initialisation have been performed"
+        L0, X0 = self.L0x0
+
+        if save:
+            if not isdir(save): mkdir(save)
+            print("Save init from in " + save + "...")
+
+            nice_X0 = self.coro.numpy() * X0
+            nice_X0 = (nice_X0 - np.median(nice_X0)).clip(0)
+
+            write_fits(save + "/L0.fits", L0, verbose=False)
+            write_fits(save + "/X0.fits", X0, verbose=False)
+            write_fits(save + "/nice_X0.fits", self.coro.numpy() * nice_X0, verbose=False)
+
+        return L0, X0
+
 
 # %% ------------------------------------------------------------------------
 def normlizangle(angles: np.array) -> np.array:
@@ -573,6 +614,7 @@ def normlizangle(angles: np.array) -> np.array:
     angles = angles % 360
 
     return angles
+
 
 def compute_rot_weight(angs: np.array) -> np.array:
     nb_frm = len(angs)

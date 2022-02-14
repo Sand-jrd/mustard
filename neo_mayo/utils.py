@@ -106,10 +106,10 @@ def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_c
     M = np.zeros(shape)
     rotation = np.deg2rad(rotation)
 
-    def isInEllipse(x: float, y: float) -> bool:
+    def isInEllipse(xc: float, yc: float) -> bool:
         """Tell if the point (x,y) is inside the ellipse"""
-        term1 = (x - mid[0])*np.cos(rotation) +  (y - mid[1])*np.sin(rotation)
-        term2 = (x - mid[0])*np.sin(rotation) - (y - mid[1])*np.cos(rotation)
+        term1 = (xc - mid[0])*np.cos(rotation) +  (yc - mid[1])*np.sin(rotation)
+        term2 = (xc - mid[0])*np.sin(rotation) - (yc - mid[1])*np.cos(rotation)
         return (term1 / small_ax)**2 + (term2 / big_ax)**2  <= 1
 
     # Generate elips coordinate trace points
@@ -129,9 +129,7 @@ def gaussian(shape, sigma = 1, mu = 0) :
     return np.exp(-((dst - mu) ** 2 / (2.0 * sigma ** 2)))
 
 
-
 # %% Manage files
-
 def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
     #  Import data
     json_file = glob.glob(datadir + "/*.json")
@@ -159,7 +157,7 @@ def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
 
 
 def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: int, msg_box: str,
-               extra_msg: str or None, datadir: str or bool, coro  = 1) -> None:
+               extra_msg: str or None, datadir: str or bool, coro : torch.Tensor(1)) -> None:
 
     L_np  = abs(L.detach().numpy()[0, :, :])
     X_np  = abs(x.detach().numpy()[0, :, :])
