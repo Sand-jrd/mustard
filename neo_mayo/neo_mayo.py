@@ -29,6 +29,7 @@ import numpy as np
 # Loss functions
 import torch.optim as optim
 from torch import sum as tsum
+from torch.nn import ReLU as relu_constr
 
 # Other
 from neo_mayo.utils import circle, iter_to_gif, print_iter
@@ -42,7 +43,8 @@ sep = ('_' * 50)
 
 info_iter = "Iteration n°{} : total loss {:.12e}" +\
             "\n\tWith R1 = {:.7e} ({:.0f}%)" +\
-            "\n\tWith R2 = {:.7e} ({:.0f}%)" +\
+            "\n\tWith R2 = {:.7e} ({:.0f}%)" + \
+            "\n\tWith Rp = {:.7e} ({:.0f}%)" + \
             "\n\tand loss = {:.7e} ({:.0f}%)"
 
 init_msg = sep + "\nResolving IP-ADI optimization problem ...{}" +\
@@ -54,11 +56,14 @@ init_msg = sep + "\nResolving IP-ADI optimization problem ...{}" +\
 activ_msg = "REGUL HAVE BEEN {} with w_r={:.2e} and w_r2={:.2e}"
 
 
-def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
+ReLU = relu_constr()
+
+def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -> tuple:
     """ Compute Regul weight over data attachment terme """
     return tuple(np.array((1, 100/L)) * abs(R1)) + \
            tuple(np.array((1, 100/L)) * abs(R2)) + \
-           tuple(np.array((1, 100/L)) * (L - Ractiv * (abs(R1) + abs(R2))))
+           tuple(np.array((1, 100 / L)) * abs(Rp)) + \
+           tuple(np.array((1, 100/L)) * (L - Ractiv * (abs(R1) + abs(R2)) - abs(Rp) ))
 
 
 # %% ------------------------------------------------------------------------
@@ -118,12 +123,12 @@ class mayo_estimator:
             pupilR = circle(self.shape, self.shape[0]/2 - 2)
         elif isinstance(pupil, float) or isinstance(pupil, int):
             pupil  = circle(self.shape, pupil)
-            pupilR = circle(self.shape, pupil - 3)
+            pupilR = circle(self.shape, pupil - 2)
         else: raise ValueError("Invalid pupil key argument. Possible values : {float/int, None, 'edge'}")
 
         if coro is None: coro = 0
         self.coro   = (1 - circle(self.shape, coro)) * pupil
-        self.coroR  = (1 - circle(self.shape, coro+3)) * pupilR
+        self.coroR  = (1 - circle(self.shape, coro + 3)) * pupilR
 
         # Convert to tensor
         rot_angles = normlizangle(angles)
@@ -212,6 +217,7 @@ class mayo_estimator:
         elif mode == "smooth" :
             self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2) +\
                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2)
+
         elif mode == "peak_preservation" :
             self.xmax = 1
             self.fpeak = lambda X: torch.log(self.xmax - X/self.xmax)
@@ -271,7 +277,7 @@ class mayo_estimator:
             warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
 
         penaliz = penaliz.capitalize()
-        rM = self.coroR  # corono mask for regul
+        rM = self.coro  # corono mask for regul
         if penaliz not in ("X", "L", "Both", "B") :
             raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
 
@@ -304,8 +310,8 @@ class mayo_estimator:
         R2_name += " inverted" if invert else ""
         self.config[1] = R2_name
 
-    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, med_sub=False, maxiter=10, w_way=(0, 1),
-                 gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
+    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, med_sub=False, res_pos=True, maxiter=10,
+                   w_way=(0, 1), gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
         """ Resole the minimization of probleme neo-mayo
             The first step with pca aim to find a good initialisation
             The second step process to the minimization
@@ -330,6 +336,9 @@ class mayo_estimator:
 
         med_sub : bool
             if True, will proceed to a median subtraction (recommended)
+
+        res_pos : bool
+            Add regularization to penalize negative residual
 
         maxiter : int
             Maximum number of optimization steps
@@ -392,6 +401,9 @@ class mayo_estimator:
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
         science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+        # med = torch.median(self.coro * science_data, dim=1, keepdim=True).values
+        med = torch.median(science_data)
+        # med = 0
 
         # __________________________________
         # Initialisation with max common
@@ -426,11 +438,19 @@ class mayo_estimator:
         # Model and loss at step 0
         with torch.no_grad():
 
+            # Force initialization to be with POSITIVE RESIDUAL
             Y0 = self.model.forward_ADI(L0, X0, flux_0) if w_way[0] else 0
-            Y0_reverse = self.model.forward_ADI_reverse(L0, torch.flip(X0, [2]), flux_0) if w_way[1] else 0
+
+            Y0 = self.model.forward_ADI(L0, X0, flux_0) if w_way[0] else 0
+            Y0_reverse = self.model.forward_ADI_reverse(L0, X0, flux_0) if w_way[1] else 0
 
             loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
+
+            Rpos =  self.nb_frames**2 * self.shape[0]**2 * ( \
+                w_way[0] * torch.sum(self.ang_weight * self.coro * ReLU(Y0-science_data - med)**2 ) +\
+                w_way[1] * torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot - med) ** 2))\
+                if res_pos else 0
 
             if w_pcent and Ractiv :
                 w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
@@ -438,7 +458,7 @@ class mayo_estimator:
 
             R1_0 = Ractiv * w_r * self.regul(X0, L0)
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
-            loss0 += (R1_0 + R2_0)
+            loss0 += (R1_0 + R2_0 + Rpos)
 
         loss, R1, R2 = loss0, R1_0, R2_0
 
@@ -447,7 +467,7 @@ class mayo_estimator:
 
         # Definition of minimizer step.
         def closure():
-            nonlocal R1, R2, loss, w_r, w_r2, Lk, Xk, flux_k
+            nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k
             optimizer.zero_grad()  # Reset gradients
 
             # Compute model(s)
@@ -457,11 +477,15 @@ class mayo_estimator:
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk)
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
+            Rpos = self.nb_frames**2 * ( \
+                w_way[0] * torch.sum(self.ang_weight * self.coro * ReLU(Yk - science_data - med) ** 2) + \
+                w_way[1] * torch.sum(self.ang_weight * self.coro * ReLU(Yk_reverse - science_data_derot - med) ** 2))\
+                if res_pos else 0
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum( self.ang_weight * self.coro * (Yk - science_data) ** 2) + \
                    w_way[1] * torch.sum( self.ang_weight * self.coro * (Yk_reverse - science_data_derot) ** 2) + \
-                   (R1 + R2)
+                   (R1 + R2 + Rpos)
 
             loss.backward()
             return loss
@@ -476,8 +500,8 @@ class mayo_estimator:
 
                 with torch.no_grad():
                     if w_pcent:
-                        w_r  = w_rp[0] * loss / self.regul(Xk, Lk)
-                        w_r2 = w_rp[1] * loss / self.regul2(Xk, Lk, self.mask)
+                        w_r  = w_rp[0] * (loss-Rpos) / self.regul(Xk, Lk)
+                        w_r2 = w_rp[1] * (loss-Rpos) / self.regul2(Xk, Lk, self.mask)
                 if estimI:
                     optimizer = optim.LBFGS([Lk, Xk, flux_k])
                     flux_k.requires_grad = True
@@ -489,7 +513,8 @@ class mayo_estimator:
 
         # Definition of print routines
         def process_to_prints(extra_msg=None, sub_iter=0):
-            iter_msg = info_iter.format(k + sub_iter, loss, *loss_ratio(Ractiv, float(R1), float(R2), float(loss)))
+            iter_msg = info_iter.format(k + sub_iter, loss, *loss_ratio(Ractiv, float(R1),
+                                                                        float(R2), float(Rpos), float(loss)))
             est_info = stat_msg.split("\n", 4)[3] + '\n'
             if gif: print_iter(Lk, Xk, flux_k, k + sub_iter, est_info + iter_msg, extra_msg, save, self.coro)
             if extra_msg: iter_msg += "\n" + extra_msg
@@ -586,6 +611,27 @@ class mayo_estimator:
         """Return input cube and angles"""
         return self.model.rot_angles, self.science_data
 
+    def get_residual(self, way = "direct", save=None, suffix=''):
+        """Return input cube and angles"""
+
+        if way == "direct" :
+            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
+            Lk, Xk, flux_k = self.last_iter  # Last iteration
+            reconstructed_cube = self.model.forward_ADI(Lk, Xk, flux_k)  # Reconstruction on last iteration
+            residual_cube = science_data[:, 0] - reconstructed_cube[:,0]
+
+        if way == "reverse":
+            science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+            Lk, Xk, flux_k = self.last_iter  # Last iteration
+            reconstructed_cube = self.model.forward_ADI_reverse(Lk, Xk, flux_k)  # Reconstruction on last iteration
+            residual_cube = science_data[:, 0] - reconstructed_cube[:, 0]
+
+        nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()
+        if save : write_fits(save + "/residual_"+way+"_"+suffix, nice_residual)
+
+        return nice_residual
+
     def get_initialisation(self, save=None):
         """Return input cube and angles"""
 
@@ -646,4 +692,4 @@ def compute_rot_weight(angs: np.array) -> np.array:
 
         ang_weight.append((w_2 + w_1) / 2)
 
-    return np.array(ang_weight)*(nb_frm/sum(ang_weight))
+    return np.array(ang_weight)
