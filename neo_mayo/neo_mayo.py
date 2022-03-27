@@ -401,7 +401,7 @@ class mayo_estimator:
         science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=1, keepdim=True).values
-        med = torch.median(science_data)
+        med = torch.median(self.coro * science_data)
         # med = 0
 
         # __________________________________
@@ -446,10 +446,11 @@ class mayo_estimator:
             loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
-            Rpos =  self.nb_frames**2 * self.shape[0]**2 * ( \
-                w_way[0] * torch.sum(self.ang_weight * self.coro * ReLU(Y0-science_data - med)**2 ) +\
-                w_way[1] * torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot - med) ** 2))\
-                if res_pos else 0
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(X0) - science_data - med)**2) \
+                if w_way[0] and res_pos else 0
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(self.coro*ReLU(X0) - science_data_derot - med) ** 2) \
+                if w_way[1] and res_pos else 0
+            Rpos *= 2*self.nb_frames**2 #Rpos weight
 
             if w_pcent and Ractiv :
                 w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
@@ -476,10 +477,11 @@ class mayo_estimator:
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk)
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
-            Rpos = self.nb_frames**2 * ( \
-                w_way[0] * torch.sum(self.ang_weight * self.coro * ReLU(Yk - science_data - med) ** 2) + \
-                w_way[1] * torch.sum(self.ang_weight * self.coro * ReLU(Yk_reverse - science_data_derot - med) ** 2))\
-                if res_pos else 0
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk) - science_data - med)**2) \
+                if w_way[0] and res_pos else 0
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(self.coro*ReLU(Xk) - science_data_derot - med) ** 2)  \
+                if w_way[1] and res_pos else 0
+            Rpos *= 2*self.nb_frames**2 #Rpos weight
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum( self.ang_weight * self.coro * (Yk - science_data) ** 2) + \
@@ -617,14 +619,14 @@ class mayo_estimator:
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
             Lk, Xk, flux_k = self.last_iter  # Last iteration
             reconstructed_cube = self.model.forward_ADI(Lk, Xk, flux_k)  # Reconstruction on last iteration
-            residual_cube = science_data[:, 0] - reconstructed_cube[:,0]
+            residual_cube = science_data[:, 0] - reconstructed_cube
 
         if way == "reverse":
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
             science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
             Lk, Xk, flux_k = self.last_iter  # Last iteration
             reconstructed_cube = self.model.forward_ADI_reverse(Lk, Xk, flux_k)  # Reconstruction on last iteration
-            residual_cube = science_data[:, 0] - reconstructed_cube[:, 0]
+            residual_cube = science_data[:, 0] - reconstructed_cube
 
         nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()
         if save : write_fits(save + "/residual_"+way+"_"+suffix, nice_residual)
