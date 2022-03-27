@@ -14,7 +14,9 @@ import numpy
 import numpy as np
 import torch
 from neo_mayo.algo import tensor_rotate_fft, tensor_conv
+from torch.nn import ReLU as relu_constr
 
+ReLU = relu_constr()
 
 # %% Forward ADI model :
 class model_ADI:
@@ -51,16 +53,17 @@ class model_ADI:
 
         if flux is None: flux = torch.ones(self.nb_frame - 1)
 
+
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
         # First image. No intensity vector
-        Rx = tensor_rotate_fft(x.abs(), float(self.rot_angles[0]))
-        Y[0] = L.abs() + self.coro * Rx.abs()
+        Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
+        Y[0] = ReLU(L) + self.coro * ReLU(Rx)
 
         for frame_id in range(1, self.nb_frame):
-            Rx = tensor_rotate_fft(x.abs(), float(self.rot_angles[frame_id]))
+            Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
             if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
-            Y[frame_id] = flux[frame_id - 1] * L.abs() + self.coro * Rx.abs()
+            Y[frame_id] = flux[frame_id - 1] * ReLU(L) + self.coro * ReLU(Rx)
 
         return Y
 
@@ -72,13 +75,13 @@ class model_ADI:
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
         # First image. No intensity vector
-        Rl = tensor_rotate_fft(L.abs(), -float(self.rot_angles[0]))
-        Y[0] = Rl + self.coro * x.abs()
+        Rl = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[0]))
+        Y[0] = Rl + self.coro * ReLU(x)
 
         for frame_id in range(1, self.nb_frame):
-            RL = tensor_rotate_fft(L.abs(), -float(self.rot_angles[frame_id]))
-            if self.psf is not None: x = tensor_conv(x.abs(), self.psf)
-            Y[frame_id] = flux[frame_id - 1] * RL + self.coro * x.abs()
+            RL = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[frame_id]))
+            if self.psf is not None: x = tensor_conv(ReLU(x), self.psf)
+            Y[frame_id] = flux[frame_id - 1] * RL + self.coro * ReLU(x)
 
         return Y
 

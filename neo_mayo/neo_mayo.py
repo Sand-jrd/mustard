@@ -55,7 +55,6 @@ init_msg = sep + "\nResolving IP-ADI optimization problem ...{}" +\
 
 activ_msg = "REGUL HAVE BEEN {} with w_r={:.2e} and w_r2={:.2e}"
 
-
 ReLU = relu_constr()
 
 def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -> tuple:
