@@ -37,6 +37,7 @@ from neo_mayo.model import model_ADI
 
 # -- For verbose -- #
 from datetime import datetime
+import matplotlib.pyplot as plt
 import warnings
 
 sep = ('_' * 50)
@@ -401,7 +402,7 @@ class mayo_estimator:
         science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=1, keepdim=True).values
-        med = torch.median(self.coro * science_data)
+        med = torch.median(science_data)
         # med = 0
 
         # __________________________________
@@ -427,34 +428,37 @@ class mayo_estimator:
         L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
         X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
         flux_0 = torch.ones(self.model.nb_frame - 1)
+        fluxR_0 = torch.ones(self.model.nb_frame - 1)
 
         # ______________________________________
         #  Init variables and optimizer
 
-        Lk, Xk, flux_k, k = L0.clone(), X0.clone(), flux_0.clone(), 0
+        Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
         Lk.requires_grad = True; Xk.requires_grad = True
 
         # Model and loss at step 0
         with torch.no_grad():
 
             # Force initialization to be with POSITIVE RESIDUAL
-            Y0 = self.model.forward_ADI(L0, X0, flux_0) if w_way[0] else 0
+            Y0 = self.model.forward_ADI(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
 
-            Y0 = self.model.forward_ADI(L0, X0, flux_0) if w_way[0] else 0
-            Y0_reverse = self.model.forward_ADI_reverse(L0, X0, flux_0) if w_way[1] else 0
+            Y0 = self.model.forward_ADI(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
+            Y0_reverse = self.model.forward_ADI_reverse(L0, X0, flux_0, fluxR_0) if w_way[1] else 0
 
             loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
-            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(X0) - science_data - med)**2) \
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(X0, fluxR_0) - science_data-med)**2) \
                 if w_way[0] and res_pos else 0
-            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(self.coro*ReLU(X0) - science_data_derot - med) ** 2) \
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(X0 - science_data_derot-med) ** 2) \
                 if w_way[1] and res_pos else 0
-            Rpos *= 2*self.nb_frames**2 #Rpos weight
+            Rpos *= self.nb_frames**2 # Rpos weight
 
             if w_pcent and Ractiv :
                 w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
                 w_r2 = w_rp[1] * loss0 / self.regul2(X0, L0, self.mask)
+                #w_r = w_rp[0] * (loss0+torch.sqrt(Rpos)) / self.regul(X0, L0)  # Auto hyperparameters
+                #w_r2 = w_rp[1] * (loss0+torch.sqrt(Rpos)) / self.regul2(X0, L0, self.mask)
 
             R1_0 = Ractiv * w_r * self.regul(X0, L0)
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
@@ -467,21 +471,21 @@ class mayo_estimator:
 
         # Definition of minimizer step.
         def closure():
-            nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k
+            nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k, fluxR_k
             optimizer.zero_grad()  # Reset gradients
 
             # Compute model(s)
-            Yk = self.model.forward_ADI(Lk, Xk, flux_k) if w_way[0] else 0
-            Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k) if w_way[1] else 0
+            Yk = self.model.forward_ADI(Lk, Xk, flux_k, fluxR_k) if w_way[0] else 0
+            Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k, fluxR_k) if w_way[1] else 0
 
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk)
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
-            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk) - science_data - med)**2) \
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk,fluxR_k) - science_data - med)**2)\
                 if w_way[0] and res_pos else 0
-            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(self.coro*ReLU(Xk) - science_data_derot - med) ** 2)  \
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Xk - science_data_derot - med) ** 2)  \
                 if w_way[1] and res_pos else 0
-            Rpos *= 2*self.nb_frames**2 #Rpos weight
+            Rpos *= self.nb_frames**2 #Rpos weight
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum( self.ang_weight * self.coro * (Yk - science_data) ** 2) + \
@@ -493,7 +497,7 @@ class mayo_estimator:
 
         # Definition of regularization activation
         def activation():
-            nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k
+            nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k, fluxR_k
             for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
 
                 # Second step : re-compute regul after performing a optimizer step
@@ -504,8 +508,8 @@ class mayo_estimator:
                         w_r  = w_rp[0] * (loss-Rpos) / self.regul(Xk, Lk)
                         w_r2 = w_rp[1] * (loss-Rpos) / self.regul2(Xk, Lk, self.mask)
                 if estimI:
-                    optimizer = optim.LBFGS([Lk, Xk, flux_k])
-                    flux_k.requires_grad = True
+                    optimizer = optim.LBFGS([Lk, Xk, flux_k, fluxR_k])
+                    flux_k.requires_grad = True; fluxR_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
 
@@ -523,8 +527,8 @@ class mayo_estimator:
 
         # If L_I is set to True, L variation intensity will be estimated
         if estimI :
-            optimizer = optim.LBFGS([Lk, Xk, flux_k])
-            flux_k.requires_grad = True
+            optimizer = optim.LBFGS([Lk, Xk, flux_k, fluxR_k])
+            flux_k.requires_grad = True; fluxR_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
@@ -534,7 +538,7 @@ class mayo_estimator:
 
         # Save & prints the first iteration
         loss_evo.append(loss)
-        self.last_iter = (L0, X0, flux_0) if estimI else (L0, X0)
+        self.last_iter = (L0, X0, flux_0, fluxR_k) if estimI else (L0, X0)
         process_to_prints()
 
         start_time = datetime.now()
@@ -560,8 +564,8 @@ class mayo_estimator:
                 # Save & prints
                 loss_evo.append(loss)
                 grad_evo.append(torch.mean(abs(Lk.grad.data)) + torch.mean(abs(Xk.grad.data)))
-                self.last_iter = (Lk, Xk, flux_k) if estimI else (Lk, Xk)
-                if k == 1 : self.first_iter = (Lk, Xk, flux_k) if estimI else (Lk, Xk)
+                self.last_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
+                if k == 1 : self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
                 process_to_prints()
 
                 # Break point (based on gtol)
@@ -588,11 +592,14 @@ class mayo_estimator:
             L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
 
         flux  = abs(flux_k.detach().numpy())
+        fluxR = abs(fluxR_k.detach().numpy())
+        loss_evo = [lossk.detach().numpy() for lossk in loss_evo]
 
         # Result dict
         res = {'state'   : optimizer.state,
                'x'       : (L_est, X_est),
                'flux'    : flux,
+               'fluxR'   : fluxR,
                'loss_evo': loss_evo,
                'ending'  : ending}
 
@@ -603,7 +610,7 @@ class mayo_estimator:
 
         suffix = '' if not suffix else '_' + suffix
         if save: write_fits(save + "/L_est"+suffix, L_est), write_fits(save + "/X_est"+suffix, X_est)
-        if save and estimI : write_fits(save + "/flux"+suffix, flux)
+        if save and estimI : write_fits(save + "/flux"+suffix, flux); write_fits(save + "/fluxR"+suffix, fluxR)
 
         if estimI: return L_est, X_est, flux
         else     : return L_est, X_est
@@ -617,21 +624,74 @@ class mayo_estimator:
 
         if way == "direct" :
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-            Lk, Xk, flux_k = self.last_iter  # Last iteration
-            reconstructed_cube = self.model.forward_ADI(Lk, Xk, flux_k)  # Reconstruction on last iteration
-            residual_cube = science_data[:, 0] - reconstructed_cube
+            reconstructed_cube = self.model.forward_ADI(*self.last_iter)  # Reconstruction on last iteration
+            residual_cube = science_data - reconstructed_cube
 
         if way == "reverse":
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
             science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
-            Lk, Xk, flux_k = self.last_iter  # Last iteration
-            reconstructed_cube = self.model.forward_ADI_reverse(Lk, Xk, flux_k)  # Reconstruction on last iteration
-            residual_cube = science_data[:, 0] - reconstructed_cube
+            reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
+            residual_cube = science_data - reconstructed_cube
 
-        nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()
+        nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()[:, 0, :, :]
         if save : write_fits(save + "/residual_"+way+"_"+suffix, nice_residual)
 
         return nice_residual
+
+    def get_evo_convergence(self, show=True, Kactiv=3):
+        """Return loss evolution"""
+
+        loss_evo = self.res['loss_evo']
+        if show :
+            plt.figure("Evolution of loss criteria")
+            plt.subplots(1, 2, gridspec_kw={'width_ratios': [2*Kactiv, len(loss_evo)-2*Kactiv]})
+
+            plt.subplot(121), plt.xlabel("Iteration"), plt.ylabel("Loss - log scale"), plt.yscale('log')
+            plt.plot(loss_evo[:Kactiv], 'X-', color="tab:orange"), plt.title("Loss evolution BEFORE activation")
+
+            plt.subplot(122), plt.xlabel("Iteration"), plt.ylabel("Loss - log scale"), plt.yscale('log')
+            plt.plot(loss_evo[Kactiv:], 'X-', color="tab:blue"), plt.title("Loss evolution, AFTER activation")
+            plt.xticks(range(len(loss_evo)-Kactiv), range(Kactiv, len(loss_evo)) )
+
+        return loss_evo
+
+    def get_flux(self, show=True):
+        """Return relative flux variations between frame"""
+
+        flux = self.res['flux']
+        fluxR = self.res['fluxR']
+
+        if show :
+            plt.figure("Relative flux variations between frame")
+            lim = max(abs((flux - 1)))
+            limR = max(abs((fluxR - 1)))
+
+            plt.subplot(1, 2, 1), plt.bar(range(len(flux)), flux - 1, color='tab:red', edgecolor="black")
+            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("flux variations of starlight and speckels")
+            plt.ylim([-lim, lim])
+
+            plt.subplot(1, 2, 2), plt.bar(range(len(fluxR)), fluxR - 1, color='tab:green', edgecolor="black")
+            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("flux variations of circonstellar object(s)")
+            plt.ylim([-limR, limR])
+
+        return flux, fluxR
+
+    def get_reconstruction(self, way="direct", save=None, suffix=''):
+        """Return input cube and angles"""
+
+        if way == "direct":
+            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
+            reconstructed_cube = self.model.forward_ADI(*self.last_iter)  # Reconstruction on last iteration
+
+        if way == "reverse":
+            science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+            reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
+
+        reconstructed_cube = reconstructed_cube.detach().numpy()[:, 0, :, :]
+        if save: write_fits(save + "/reconstruction_" + way + "_" + suffix, reconstructed_cube)
+
+        return reconstructed_cube
 
     def get_initialisation(self, save=None):
         """Return input cube and angles"""

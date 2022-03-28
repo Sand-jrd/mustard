@@ -30,15 +30,15 @@ estimator = mayo_estimator(datadir, coro=8, ispsf=False, weighted_rot=True,  Bad
 
 # Configure your estimator parameters
 param = {'w_r'   : 0.05,      # Proportion of Regul over J
-        'w_r2'   : 0.1,      # Proportion of Regul2 over J
-        'w_way'  : (1, 1),    # You can either work with derotated_cube or rotated cube. Or both
+        'w_r2'   : 0.05,      # Proportion of Regul2 over J
+        'w_way'  : (1, 0),    # You can either work with derotated_cube or rotated cube. Or both
         'gtol'   : 1e-7,      # Gradient tolerence. Stop the estimation when the mean of gradient will hit the value
-        'kactiv' : None,      # Iter before activate regul (i.e when to compute true weight base on w_r proportion)
-        'estimI' : True,      # Estimate frames flux is highly recommended !
-        'med_sub': True,     # perform a median substraction highly recommended !
-        'suffix' : "Rpos",        # Name of your simulation (this is optional)
-        'res_pos': True,      # Penalize negative residual
-        'maxiter': 30}         # Maximum number of iterations (it converge fast tbh)
+        'kactiv' : 3,         # Iter before activate regul (i.e when to compute true weight base on w_r proportion)
+        'estimI' : True,     # Estimate frames flux is highly recommended !
+        'med_sub': True,      # perform a median substraction highly recommended !
+        'suffix' : "Rpos",  # Name of your simulation (this is optional)
+        'res_pos': True,     # Penalize negative residual
+        'maxiter': 50}        # Maximum number of iterations (it converge fast tbh)
 
 # %% -------------------------------------
 # Configure your regularization if you feel the need
@@ -58,12 +58,17 @@ if param['estimI'] :  L_est, X_est, flux = estimator.estimate(**param, save=data
 else : L_est, X_est = estimator.estimate(**param, save=datadir, gif=False, verbose=True)
 # N.B : You can stop estimation with esc/ctrl+C. It will terminate properly and results will be return & save
 
-# Complete results are stored in the estimator
+# Complete results are stored in the estimator ...
 res = estimator.res
 
-# The estimator store a lots of stuff :
+# .. -.but you can access easily to what you need with get methods  :
 L0, X0 = estimator.get_initialisation(save="./L0x0/")  # initialization
-Lk, Xk, flux_k = estimator.last_iter      # Last iteration
-grad = Xk.grad.data[0].detach().numpy()   # Last value of gradient
-residual_cube = estimator.get_residual(way="direct", save=datadir, suffix=param['suffix'])  # Residual cube
-residual_cube2 = estimator.get_residual(way="reverse", save=datadir, suffix=param['suffix'])  # Residual derotated cube
+
+estimator.get_residual(way="direct", save=datadir, suffix=param['suffix'])  # Residual cube
+estimator.get_residual(way="reverse", save=datadir, suffix=param['suffix'])  # Residual derotated cube
+
+estimator.get_reconstruction(way="direct", save=datadir, suffix=param['suffix'])  # Reconstruction
+estimator.get_reconstruction(way="reverse", save=datadir, suffix=param['suffix'])  # Reconstruction by derotation
+
+estimator.get_evo_convergence(show=True)
+estimator.get_flux(show=True)

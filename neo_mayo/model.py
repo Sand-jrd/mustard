@@ -52,7 +52,7 @@ class model_ADI:
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
         if flux is None: flux = torch.ones(self.nb_frame - 1)
-        if fluxR is None: flux = torch.ones(self.nb_frame - 1)
+        if fluxR is None: fluxR = torch.ones(self.nb_frame - 1)
 
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
@@ -71,7 +71,7 @@ class model_ADI:
         """ Process forward model  : Y =  ( flux * R(L) + x) )  """
 
         if flux is None: flux = torch.ones(self.nb_frame - 1)
-        if fluxR is None: flux = torch.ones(self.nb_frame - 1)
+        if fluxR is None: fluxR = torch.ones(self.nb_frame - 1)
 
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
@@ -90,10 +90,10 @@ class model_ADI:
 
         Rx = torch.zeros((self.nb_frame,) + self.frame_shape).double()
         if flux is None: flux = torch.ones(self.nb_frame - 1)
-        Rx[0] = self.coro * tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
+        Rx[0] = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
 
         for frame_id in range(1, self.nb_frame):
-            Rx[frame_id] = flux[frame_id - 1] * self.coro * tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
+            Rx[frame_id] = flux[frame_id - 1] * tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
 
         return Rx
 
