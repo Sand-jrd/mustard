@@ -13,7 +13,7 @@ ______________________________
 import numpy
 import numpy as np
 import torch
-from neo_mayo.algo import tensor_rotate_fft, tensor_conv
+from mustard.algo import tensor_rotate_fft, tensor_conv
 from torch.nn import ReLU as reluConstr
 ReLU = reluConstr()
 

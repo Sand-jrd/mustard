@@ -8,8 +8,8 @@ Tests of neo-mayo
 @author: sand-jrd
 """
 
-from neo_mayo import mayo_estimator
-from neo_mayo.utils import ellipse, circle, gaussian
+from mustard import mayo_estimator
+from mustard.utils import ellipse, circle, gaussian
 from vip_hci.fits import write_fits
 
 
@@ -36,9 +36,9 @@ param = {'w_r'   : 0.05,      # Proportion of Regul over J
         'kactiv' : 3,         # Iter before activate regul (i.e when to compute true weight base on w_r proportion)
         'estimI' : True,     # Estimate frames flux is highly recommended !
         'med_sub': True,      # perform a median substraction highly recommended !
-        'suffix' : "Rpos",  # Name of your simulation (this is optional)
+        'suffix' : "Rpos_no meddR",  # Name of your simulation (this is optional)
         'res_pos': True,     # Penalize negative residual
-        'maxiter': 50}        # Maximum number of iterations (it converge fast tbh)
+        'maxiter': 30}        # Maximum number of iterations (it converge fast tbh)
 
 # %% -------------------------------------
 # Configure your regularization if you feel the need
@@ -47,7 +47,7 @@ shape = estimator.model.frame_shape
 M = gaussian(shape, mu=1, sigma=2)  # You can create a mask with circle, ellipse or gaussian fcts from utils
 M = circle(shape, shape[0]//2) + 10*circle(shape, 13)  # You can create a mask with circle, ellipse or gaussian fcts from utils
 
-estimator.configR2(Msk=None, mode="l1", penaliz="X", invert=True)
+estimator.configR2(Msk=None, mode="l1", penaliz="X", invert=False)
 estimator.configR1(mode="smooth", p_L=0.5)
 #  N.B : or you can juste trust the default parameters and don't call thoses methodes
 
@@ -70,5 +70,6 @@ estimator.get_residual(way="reverse", save=datadir, suffix=param['suffix'])  # R
 estimator.get_reconstruction(way="direct", save=datadir, suffix=param['suffix'])  # Reconstruction
 estimator.get_reconstruction(way="reverse", save=datadir, suffix=param['suffix'])  # Reconstruction by derotation
 
-estimator.get_evo_convergence(show=True)
-estimator.get_flux(show=True)
+estimator.get_evo_convergence(show=True, save=datadir, suffix=param['suffix'])
+estimator.get_flux(show=True, save=datadir, suffix=param['suffix'])
+estimator.get_rot_weight(show=True, save=datadir, suffix=param['suffix'])

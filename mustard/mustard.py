@@ -13,7 +13,7 @@ ______________________________
 """
 
 # For file management
-from neo_mayo.utils import unpack_science_datadir
+from mustard.utils import unpack_science_datadir
 from vip_hci.fits import open_fits, write_fits
 from vip_hci.preproc import cube_derotate, frame_rotate
 
@@ -21,7 +21,7 @@ from os import mkdir
 from os.path import isdir
 
 # Algo and science model
-from neo_mayo.algo import init_estimate, sobel_tensor_conv
+from mustard.algo import init_estimate, sobel_tensor_conv
 import torch
 import numpy as np
 
@@ -32,8 +32,8 @@ from torch import sum as tsum
 from torch.nn import ReLU as relu_constr
 
 # Other
-from neo_mayo.utils import circle, iter_to_gif, print_iter
-from neo_mayo.model import model_ADI
+from mustard.utils import circle, iter_to_gif, print_iter
+from mustard.model import model_ADI
 
 # -- For verbose -- #
 from datetime import datetime
@@ -401,9 +401,10 @@ class mayo_estimator:
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
         science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
-        # med = torch.median(self.coro * science_data, dim=1, keepdim=True).values
-        med = torch.median(science_data)
-        # med = 0
+        # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
+        med = torch.median(science_data[torch.where(science_data*self.coro!=0)])
+        print(med)
+        med = 0
 
         # __________________________________
         # Initialisation with max common
@@ -448,11 +449,11 @@ class mayo_estimator:
             loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
-            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(X0, fluxR_0) - science_data-med)**2) \
-                if w_way[0] and res_pos else 0
-            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(X0 - science_data_derot-med) ** 2) \
-                if w_way[1] and res_pos else 0
-            Rpos *= self.nb_frames**2 # Rpos weight
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(Y0 - science_data - med)**2) \
+                if w_way[0] and res_pos and Ractiv else 0
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot-med) ** 2) \
+                if w_way[1] and res_pos and Ractiv else 0
+            Rpos *= 1#self.nb_frames-1 #**2 # Rpos weight
 
             if w_pcent and Ractiv :
                 w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
@@ -481,11 +482,13 @@ class mayo_estimator:
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk)
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask)
-            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk,fluxR_k) - science_data - med)**2)\
-                if w_way[0] and res_pos else 0
-            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Xk - science_data_derot - med) ** 2)  \
-                if w_way[1] and res_pos else 0
-            Rpos *= self.nb_frames**2 #Rpos weight
+
+            medk = 0
+            Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk, fluxR_k) - science_data - medk)**2)\
+                if w_way[0] and res_pos and Ractiv else 0
+            Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Xk - science_data_derot - medk) ** 2)  \
+                if w_way[1] and res_pos and Ractiv else 0
+            Rpos *= 1#self.nb_frames-1#**2 #Rpos weight
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum( self.ang_weight * self.coro * (Yk - science_data) ** 2) + \
@@ -569,7 +572,8 @@ class mayo_estimator:
                 process_to_prints()
 
                 # Break point (based on gtol)
-                if k > mink and torch.mean(abs(Lk.grad.data)) < gtol and torch.mean(abs(Xk.grad.data)) < gtol:
+                Lgrad, Xgrad = torch.mean(abs(Lk.grad.data)), torch.mean(abs(Xk.grad.data))
+                if k > mink and ( (Lgrad < gtol and Xgrad < gtol) ):# or loss == loss_evo[-1] ):
                     if not Ractiv and kactiv:  # If regul haven't been activated yet, continue with regul
                         Ractiv = 1; mink = k+2
                         activation()
@@ -638,13 +642,13 @@ class mayo_estimator:
 
         return nice_residual
 
-    def get_evo_convergence(self, show=True, Kactiv=3):
+    def get_evo_convergence(self, show=True, Kactiv=5, save=None, suffix=''):
         """Return loss evolution"""
 
         loss_evo = self.res['loss_evo']
         if show :
-            plt.figure("Evolution of loss criteria")
-            plt.subplots(1, 2, gridspec_kw={'width_ratios': [2*Kactiv, len(loss_evo)-2*Kactiv]})
+            fig = plt.figure("Evolution of loss criteria", figsize=(16, 9))
+            fig.subplots(1, 2, gridspec_kw={'width_ratios': [2*Kactiv, len(loss_evo)-2*Kactiv]})
 
             plt.subplot(121), plt.xlabel("Iteration"), plt.ylabel("Loss - log scale"), plt.yscale('log')
             plt.plot(loss_evo[:Kactiv], 'X-', color="tab:orange"), plt.title("Loss evolution BEFORE activation")
@@ -653,16 +657,37 @@ class mayo_estimator:
             plt.plot(loss_evo[Kactiv:], 'X-', color="tab:blue"), plt.title("Loss evolution, AFTER activation")
             plt.xticks(range(len(loss_evo)-Kactiv), range(Kactiv, len(loss_evo)) )
 
+        if save : plt.savefig(save + "/convergence_"+suffix)
+
         return loss_evo
 
-    def get_flux(self, show=True):
+    def get_rot_weight(self, show=True, save=None, suffix=''):
+        """Return loss evolution"""
+
+        weight = self.ang_weight.detach().numpy()[:,0,0,0]
+        rot_angles = self.model.rot_angles
+
+        if show :
+            plt.figure("Frame weight based on PA", figsize=(16, 9))
+
+            plt.subplot(211), plt.xlabel("Frame"), plt.ylabel("PA in deg")
+            plt.plot(rot_angles, 'X-', color="tab:purple"), plt.title("Angle for each frame")
+
+            plt.subplot(212), plt.bar(range(len(weight)), weight, color="tab:cyan", edgecolor="black")
+            plt.title("Assigned weight"), plt.xlabel("Frame"), plt.ylabel("Frame weight")
+
+        if save : plt.savefig(save + "/PA_frame_weight_"+suffix)
+
+        return weight
+
+    def get_flux(self, show=True, save=None, suffix=''):
         """Return relative flux variations between frame"""
 
         flux = self.res['flux']
         fluxR = self.res['fluxR']
 
         if show :
-            plt.figure("Relative flux variations between frame")
+            plt.figure("Relative flux variations between frame", figsize=(16, 9))
             lim = max(abs((flux - 1)))
             limR = max(abs((fluxR - 1)))
 
@@ -673,6 +698,8 @@ class mayo_estimator:
             plt.subplot(1, 2, 2), plt.bar(range(len(fluxR)), fluxR - 1, color='tab:green', edgecolor="black")
             plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("flux variations of circonstellar object(s)")
             plt.ylim([-limR, limR])
+
+        if save : plt.savefig(save + "/flux_"+suffix)
 
         return flux, fluxR
 
