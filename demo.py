@@ -8,25 +8,27 @@ Tests of neo-mayo
 @author: sand-jrd
 """
 
-from mustard import mayo_estimator
-from mustard.utils import ellipse, circle, gaussian
-from vip_hci.fits import write_fits
+from mustard import mustard_estimator
+from vip_hci.fits import open_fits
+
+# Stuff to help you build a custom R2
+from mustard.utils import ellipse, circle, gaussian, unpack_science_datadir
 
 
 # %% -------------------------------------
-# Test mayo estimator constructor
+# Load your data and build the estimator.
 
-# Choose where to get datas
+# Load the ADI cube and the associated angles
 datadir = "./example-data/"
-# datadir = "../PDS70-neomayo/097.C-1001A/K1/"
-# datadir = "../Data_challenge/Test_PDS/test_one/"
+science_data = open_fits(datadir+"cube.fits")
+angles = open_fits(datadir+"angles.fits")
 
-# Badframes = (0, 35, 36)
-# Badframes = list(range(0, 672))
-# for k, ii in enumerate(range(0, 672, 5)) : del Badframes[ii-k]
+# (obsolete) There is a tool that gets data in from your repository.
+# datadir = "../PDS70-neomayo/1100.C-0481D/K2/"
+# science_data, angles, psf =  unpack_science_datadir(datadir)
 
-# First step is to build our estimator with the datas
-estimator = mayo_estimator(datadir, coro=8, ispsf=False, weighted_rot=True,  Badframes=None)
+# Then build your  estimator with the datas
+estimator = mustard_estimator(science_data, angles, coro=8, pupil="edge", Badframes=None)
 
 # Configure your estimator parameters
 param = {'w_r'   : 0.05,      # Proportion of Regul over J
@@ -34,10 +36,11 @@ param = {'w_r'   : 0.05,      # Proportion of Regul over J
         'w_way'  : (1, 0),    # You can either work with derotated_cube or rotated cube. Or both
         'gtol'   : 1e-7,      # Gradient tolerence. Stop the estimation when the mean of gradient will hit the value
         'kactiv' : 3,         # Iter before activate regul (i.e when to compute true weight base on w_r proportion)
-        'estimI' : True,     # Estimate frames flux is highly recommended !
+        'estimI' : "Both",    # Estimate frames flux is highly recommended ! possible value : {"Frame","L","Both"}
         'med_sub': True,      # perform a median substraction highly recommended !
-        'suffix' : "Rpos_no meddR",  # Name of your simulation (this is optional)
-        'res_pos': True,     # Penalize negative residual
+        'weighted_rot' : True,# Compute weight for each frame according to PA angle separations.
+        'suffix' : "",        # Name of your simulation (this is optional)
+        'res_pos': False,     # Penalize negative residual
         'maxiter': 30}        # Maximum number of iterations (it converge fast tbh)
 
 # %% -------------------------------------
@@ -47,7 +50,7 @@ shape = estimator.model.frame_shape
 M = gaussian(shape, mu=1, sigma=2)  # You can create a mask with circle, ellipse or gaussian fcts from utils
 M = circle(shape, shape[0]//2) + 10*circle(shape, 13)  # You can create a mask with circle, ellipse or gaussian fcts from utils
 
-estimator.configR2(Msk=None, mode="l1", penaliz="X", invert=False)
+estimator.configR2(Msk=None, mode="l1", penaliz="X", invert=True)
 estimator.configR1(mode="smooth", p_L=0.5)
 #  N.B : or you can juste trust the default parameters and don't call thoses methodes
 
@@ -61,15 +64,18 @@ else : L_est, X_est = estimator.estimate(**param, save=datadir, gif=False, verbo
 # Complete results are stored in the estimator ...
 res = estimator.res
 
-# .. -.but you can access easily to what you need with get methods  :
+# In case you didn't provid a savedir before and you don't want it to be print at workingdir
+estimator.set_savedir(datadir)
+
+
+# You can access easily to what you need with get methods  :
 L0, X0 = estimator.get_initialisation(save="./L0x0/")  # initialization
 
-estimator.get_residual(way="direct", save=datadir, suffix=param['suffix'])  # Residual cube
-estimator.get_residual(way="reverse", save=datadir, suffix=param['suffix'])  # Residual derotated cube
+estimator.get_residual(way="direct", save=True)  # Residual cube
+estimator.get_reconstruction(way="direct", save=True)  # Reconstruction
 
-estimator.get_reconstruction(way="direct", save=datadir, suffix=param['suffix'])  # Reconstruction
-estimator.get_reconstruction(way="reverse", save=datadir, suffix=param['suffix'])  # Reconstruction by derotation
+estimator.get_evo_convergence(show=True, save=True)
+estimator.get_flux(show=True, save=True)
+estimator.get_rot_weight(show=True, save=True)
 
-estimator.get_evo_convergence(show=True, save=datadir, suffix=param['suffix'])
-estimator.get_flux(show=True, save=datadir, suffix=param['suffix'])
-estimator.get_rot_weight(show=True, save=datadir, suffix=param['suffix'])
+estimator.mustard_results()

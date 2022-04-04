@@ -13,11 +13,10 @@ ______________________________
 """
 
 # For file management
-from mustard.utils import unpack_science_datadir
 from vip_hci.fits import open_fits, write_fits
 from vip_hci.preproc import cube_derotate, frame_rotate
 
-from os import mkdir
+from os import mkdir, remove, rmdir
 from os.path import isdir
 
 # Algo and science model
@@ -38,21 +37,20 @@ from mustard.model import model_ADI
 # -- For verbose -- #
 from datetime import datetime
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
 import warnings
+from PIL import Image
 
 sep = ('_' * 50)
 
-info_iter = "Iteration n°{} : total loss {:.12e}" +\
-            "\n\tWith R1 = {:.7e} ({:.0f}%)" +\
-            "\n\tWith R2 = {:.7e} ({:.0f}%)" + \
-            "\n\tWith Rp = {:.7e} ({:.0f}%)" + \
-            "\n\tand loss = {:.7e} ({:.0f}%)"
+info_iter = "|{:^3}|{:.6e} ({:^3.0f}%)|{:.6e} ({:^2.0f}%)|{:.6e} ({:^2.0f}%)|{:.6e} ({:^2.0f}%)|{:.12e}|"
 
-init_msg = sep + "\nResolving IP-ADI optimization problem ...{}" +\
-                 "\nProcessing cube from : {}" +\
+init_msg = sep + "\nResolving IP-ADI optimization problem - name : {}" +\
+                 "\n Outputs will be saved {}" +\
                  "\nRegul R1 : '{}' and R2 : '{}'" +\
-                 "\n{} deconvolution and {} frame weighted based on rotations" +\
-                 "\nw_r are sets to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
+                 "\n{} deconvolution and {} frame weighted based on rotations" + \
+                 "\nRelative amplitude of {} will be estimated" + \
+                 "\nRegul weight are set to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
 
 activ_msg = "REGUL HAVE BEEN {} with w_r={:.2e} and w_r2={:.2e}"
 
@@ -60,50 +58,41 @@ ReLU = relu_constr()
 
 def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -> tuple:
     """ Compute Regul weight over data attachment terme """
-    return tuple(np.array((1, 100/L)) * abs(R1)) + \
+    return tuple(np.array((1, 100/L)) * (L - Ractiv * (abs(R1) + abs(R2)) - abs(Rp) )) + \
+    tuple(np.array((1, 100/L)) * abs(R1)) + \
            tuple(np.array((1, 100/L)) * abs(R2)) + \
-           tuple(np.array((1, 100 / L)) * abs(Rp)) + \
-           tuple(np.array((1, 100/L)) * (L - Ractiv * (abs(R1) + abs(R2)) - abs(Rp) ))
+           tuple(np.array((1, 100 / L)) * abs(Rp))
+
 
 
 # %% ------------------------------------------------------------------------
-class mayo_estimator:
+class mustard_estimator:
     """ Neo-mayo Algorithm main class  """
 
-    def __init__(self, datadir="./data", coro=6, pupil="edge", ispsf=False, weighted_rot=True, regul="smooth",
-                 Badframes=None):
+    def __init__(self, science_data, angles, coro=6, pupil="edge", psf=None, Badframes=None):
         """
         Initialisation of estimator object
 
         Parameters
         ----------
-        datadir : str
-            path to data. In this folder, it must find a json file.
-            The json should tell the fits file name of cube and angles.
-            Json tempalte can be found in exemple-data/0_import_info.json
         coro : int
-            size of the coronograph
+            Size of the coronograph
+
         pupil : int, None or "edge"
             Size of the pupil.
             If pupil is set to "edge" : the pupil raduis will be half the size of the frame
             If pupil is set to None : there will be no pupil at all
+
         ispsf : bool
-            if True, will perform deconvolution (i.e conv by psf inculded in forward model)
+            If True, will perform deconvolution (i.e conv by psf inculded in forward model)
             /!\ "psf" key must be added in json import file
-        weighted_rot : bool
-            if True, each frame will be weighted by the delta of rotation.
-            see neo-mayo thechnial details to know more.
-        regul : str (WILL MAAYYYBE BE REMOVE BECAUSE USELESS)
-            R1 regularization mode {'smooth', 'smooth_with_edges', 'l1'}
-            The R1 will be applied on X (disk and planet contribution)
+
         Badframes : tuple or list or None
             Bad frames that you will not be taken into account
         """
 
         # -- Create model and define constants --
-        angles, science_data, psf =  unpack_science_datadir(datadir)
-        if ispsf and psf is None : raise Exception("You ask to include deconvolution but "
-                                                   "no psf was provided in the json importation infos")
+        angles, science_data, psf
 
         if Badframes is not None:
             science_data = np.delete(science_data, Badframes, 0)
@@ -114,7 +103,7 @@ class mayo_estimator:
         self.nb_frames = science_data.shape[0]
         self.L0x0 = None
         self.mask = 1  # R2 mask default. Will be set if call R2 config
-        self.name = datadir
+        self.name = None
 
         # Coro and pupil masks
         if pupil is None: pupil = np.ones(self.shape); pupilR = pupil
@@ -133,19 +122,19 @@ class mayo_estimator:
         # Convert to tensor
         rot_angles = normlizangle(angles)
         self.science_data = science_data
-        self.model = model_ADI(rot_angles, self.coro, psf if ispsf else None)
+        self.model = model_ADI(rot_angles, self.coro, psf)
 
-        # Compute weights for small angles bias
-        ang_weight = compute_rot_weight(rot_angles) if weighted_rot else np.ones(self.nb_frames)
-        self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frames, 1, 1, 1))).double()
+        # Will be filled with weight if anf_weight option is activated
+        self.ang_weight = np.ones(self.nb_frames)
+
 
         self.coro  = torch.from_numpy(self.coro).double()
         self.coroR = torch.from_numpy(self.coroR).double()
 
         # -- Configure regularization (can be change later, this is defaults parameters)
-        self.config = [regul, None, 'With' if ispsf else 'No', 'with' if weighted_rot else 'no']
+        self.config = ["smooth", None, 'No' if psf is None else 'With','no', 'Both L and X']
         self.configR2(Msk=None, mode="l1", penaliz="X")
-        self.configR1(mode=regul)
+        self.configR1(mode="smooth")
 
         self.res = None; self.last_iter = None; self.first_iter = None; self.final_estim = None  # init results vars
 
@@ -158,8 +147,8 @@ class mayo_estimator:
              if None, compute PCA
              if a path is given, get L0 (starlight) and X0 (circonstellar) from the directory
 
-          save : str (optional)
-             if a path is given, L0 (starlight) and X0 (circonstellar) will be saved at the given emplacement
+          save : bool
+             if a True, L0 (starlight) and X0 (circonstellar) will be saved at self.savedir
 
           Imode : str
             Type of initialisation : {'pcait','pca'}
@@ -193,15 +182,15 @@ class mayo_estimator:
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
             if save:
-                if not isdir(save): mkdir(save)
-                print("Save init from in " + save + "...")
+                if not isdir(self.savedir + "/L0X0/"): mkdir(self.savedir + "/L0X0/")
+                print("Save init from in " + self.savedir + "/L0X0/" + "...")
 
                 nice_X0 = self.coro.numpy() * X0
                 nice_X0 = (nice_X0 - np.median(nice_X0)).clip(0)
 
-                write_fits(save + "/L0.fits", L0, verbose=False)
-                write_fits(save + "/X0.fits", X0, verbose=False)
-                write_fits(save + "/nice_X0.fits", self.coro.numpy()*nice_X0, verbose=False)
+                write_fits(self.savedir + "/L0X0/" + "/L0.fits", L0, verbose=False)
+                write_fits(self.savedir + "/L0X0/" + "/X0.fits", X0, verbose=False)
+                write_fits(self.savedir + "/L0X0/" + "/nice_X0.fits", self.coro.numpy()*nice_X0, verbose=False)
 
         # -- Define constantes
         self.L0x0 = (L0, X0)
@@ -310,8 +299,9 @@ class mayo_estimator:
         R2_name += " inverted" if invert else ""
         self.config[1] = R2_name
 
-    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI=False, med_sub=False, res_pos=True, maxiter=10,
-                   w_way=(0, 1), gtol=1e-10, kactiv=0, kdactiv=None, save=True, suffix = "", gif=False, verbose=False):
+    def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI="Both", med_sub=False, weighted_rot=True, res_pos=False,
+                 w_way=(0, 1), maxiter=10, gtol=1e-10, kactiv=0, kdactiv=None, save="./", suffix = '', gif=False,
+                 verbose=False, history=True):
         """ Resole the minimization of probleme neo-mayo
             The first step with pca aim to find a good initialisation
             The second step process to the minimization
@@ -335,18 +325,22 @@ class mayo_estimator:
             ADI model will be written as I_k*L + R(X) = Y_k
 
         med_sub : bool
-            if True, will proceed to a median subtraction (recommended)
+            If True, will proceed to a median subtraction (recommended)
+
+        weighted_rot : bool
+            if True, each frame will be weighted by the delta of rotation.
+            see neo-mayo technical details to know more.
 
         res_pos : bool
             Add regularization to penalize negative residual
 
+        w_way : tuple ints
+            If (1,0) : ADI model constructed with the cube and rotate R (direct way)
+            If (0,1) : ADI model constructed with the derotated cube and rotate L (reverse way)
+            iI (1,1) : will do both
+
         maxiter : int
             Maximum number of optimization steps
-
-        w_way : tuple ints
-            if (1,0) : ADI model constructed with the cube and rotate R (direct way)
-            if (0,1) : ADI model constructed with the derotated cube and rotate L (reverse way)
-            if (1,1) : will do both
 
         gtol : float
             Gradient tolerance; Set the break point of minimization.
@@ -362,17 +356,20 @@ class mayo_estimator:
             If set to "converg", will be deactivated when break point is reach
             Equivalent to re-run a minimization with no regul and L and X initialized at converged value
 
-        save : str or None
-            if path is given, save the result as fits
+        save : str or bool
+            If True save at ./mustard_out/
+            If path is given, save at the given path + ./mustard_out/
 
         suffix : string
             String suffix to named the simulation outputs
 
         gif : bool
-            if path is given, save each the minimization step as a gif
+            If path is given, save each the minimization step as a gif
 
         verbose : bool
             Activate or deactivate print
+        history : bool
+            If verbose == True and history == True, information on current iteration will not be overwritten
 
          Returns
          -------
@@ -380,7 +377,14 @@ class mayo_estimator:
              Estimated starlight (L) and circunstlellar (X) contributions
          
         """
+        # For verbose, saving, configuration info sortage
+        estimI = estimI.capitalize()
+        self.name = '_' + suffix if suffix else ''
+        self.savedir = save + "/mustard_out/" if isinstance(save, str) else "./mustard_out/"
+        self.config[4] = estimI + "X and L" if estimI=="Both" else estimI
+        overwrite = "\n" if history else "\r"
 
+        # Keep track on history
         mink  = 2  # Min number of iter before convergence
         loss_evo = []; grad_evo = []
 
@@ -388,6 +392,12 @@ class mayo_estimator:
         if kactiv == "converg" : kactiv = maxiter  # If option converge, kactiv start when miniz end
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
         w_rp = w_r, w_r2 if w_pcent else  0, 0
+
+        # Compute weights for small angles bias
+        if weighted_rot :
+            self.config[3] = "with"
+            ang_weight = compute_rot_weight(self.model.rot_angles)
+            self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frames, 1, 1, 1))).double()
 
         # ______________________________________
         # Define constantes and convert arry to tensor
@@ -403,7 +413,6 @@ class mayo_estimator:
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
         med = torch.median(science_data[torch.where(science_data*self.coro!=0)])
-        print(med)
         med = 0
 
         # __________________________________
@@ -510,38 +519,53 @@ class mayo_estimator:
                     if w_pcent:
                         w_r  = w_rp[0] * (loss-Rpos) / self.regul(Xk, Lk)
                         w_r2 = w_rp[1] * (loss-Rpos) / self.regul2(Xk, Lk, self.mask)
-                if estimI:
+
+                # Define the varaible to be estimated.
+                if estimI == "Both":
                     optimizer = optim.LBFGS([Lk, Xk, flux_k, fluxR_k])
                     flux_k.requires_grad = True; fluxR_k.requires_grad = True
+                elif estimI == "Frame":
+                    optimizer = optim.LBFGS([Lk, Xk, flux_k])
+                    flux_k.requires_grad = True
+                elif estimI == "L":
+                    optimizer = optim.LBFGS([Lk, Xk, fluxR_k])
+                    fluxR_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
 
-                sub_iter = 0 if activ_step == "ACTIVATED" else 0.5
+                sub_iter = -0.5 if activ_step == "ACTIVATED" else 0
                 process_to_prints(activ_msg.format(activ_step, w_r, w_r2), sub_iter)
 
         # Definition of print routines
-        def process_to_prints(extra_msg=None, sub_iter=0):
-            iter_msg = info_iter.format(k + sub_iter, loss, *loss_ratio(Ractiv, float(R1),
-                                                                        float(R2), float(Rpos), float(loss)))
+        def process_to_prints(extra_msg=None, sub_iter=0, last=False):
+            iter_msg = info_iter.format(k + sub_iter, *loss_ratio(Ractiv, float(R1),float(R2), float(Rpos),
+                                                                  float(loss)), loss)
             est_info = stat_msg.split("\n", 4)[3] + '\n'
             if gif: print_iter(Lk, Xk, flux_k, k + sub_iter, est_info + iter_msg, extra_msg, save, self.coro)
-            if extra_msg: iter_msg += "\n" + extra_msg
-            if verbose: print(iter_msg)
+            if verbose: print(iter_msg, end=overwrite if not last else "\n")
 
-        # If L_I is set to True, L variation intensity will be estimated
-        if estimI :
+        # Define the varaible to be estimated.
+        if estimI == "Both":
             optimizer = optim.LBFGS([Lk, Xk, flux_k, fluxR_k])
-            flux_k.requires_grad = True; fluxR_k.requires_grad = True
+            flux_k.requires_grad = True;
+            fluxR_k.requires_grad = True
+        elif estimI == "Frame" or "L":
+            optimizer = optim.LBFGS([Lk, Xk, flux_k])
+            flux_k.requires_grad = True
+        elif estimI == "L":
+            optimizer = optim.LBFGS([Lk, Xk, fluxR_k])
+            fluxR_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
         # Starting minization soon ...
-        stat_msg = init_msg.format(self.name, suffix, *self.config, w_r, w_r2, str(maxiter))
+        stat_msg = init_msg.format(self.name, save, *self.config, w_r, w_r2, str(maxiter))
         if verbose: print(stat_msg)
 
         # Save & prints the first iteration
         loss_evo.append(loss)
         self.last_iter = (L0, X0, flux_0, fluxR_k) if estimI else (L0, X0)
+        if verbose : print("|it|       loss        |        R1        |        R2        |       Rpos       |       total      |")
         process_to_prints()
 
         start_time = datetime.now()
@@ -573,13 +597,15 @@ class mayo_estimator:
 
                 # Break point (based on gtol)
                 Lgrad, Xgrad = torch.mean(abs(Lk.grad.data)), torch.mean(abs(Xk.grad.data))
-                if k > mink and ( (Lgrad < gtol and Xgrad < gtol) ):# or loss == loss_evo[-1] ):
+                if k > mink and ( (Lgrad < gtol and Xgrad < gtol) or loss == loss_evo[-1] ):
                     if not Ractiv and kactiv:  # If regul haven't been activated yet, continue with regul
-                        Ractiv = 1; mink = k+2
+                        Ractiv = 1; mink = k+2; kactiv=k
                         activation()
                     else : break
 
-            ending = 'max iter reached' if k == maxiter else 'gtol reached'
+            process_to_prints(last=True)
+            ending = 'max iter reached' if k == maxiter else \
+                ("Minimum reached (loss_k==loss_k+1)" if loss == loss_evo[-1] else 'gtol reached')
 
         except KeyboardInterrupt:
             ending = "keyboard interruption"
@@ -605,16 +631,20 @@ class mayo_estimator:
                'flux'    : flux,
                'fluxR'   : fluxR,
                'loss_evo': loss_evo,
+               'Kactiv'  : kactiv,
                'ending'  : ending}
 
         self.res = res
 
         # Save
-        if gif : iter_to_gif(save, suffix)
+        if gif : iter_to_gif(save, self.name)
 
-        suffix = '' if not suffix else '_' + suffix
-        if save: write_fits(save + "/L_est"+suffix, L_est), write_fits(save + "/X_est"+suffix, X_est)
-        if save and estimI : write_fits(save + "/flux"+suffix, flux); write_fits(save + "/fluxR"+suffix, fluxR)
+        if save :
+            if not isdir(self.savedir): mkdir(self.savedir)
+            write_fits(self.savedir + "/L_est"+self.name, L_est), write_fits(self.savedir + "/X_est"+self.name, X_est)
+            if estimI :
+                write_fits(self.savedir + "/flux"+self.name, flux)
+                write_fits(self.savedir + "/fluxR"+self.name, fluxR)
 
         if estimI: return L_est, X_est, flux
         else     : return L_est, X_est
@@ -623,7 +653,7 @@ class mayo_estimator:
         """Return input cube and angles"""
         return self.model.rot_angles, self.science_data
 
-    def get_residual(self, way = "direct", save=None, suffix=''):
+    def get_residual(self, way = "direct", save=False):
         """Return input cube and angles"""
 
         if way == "direct" :
@@ -638,17 +668,20 @@ class mayo_estimator:
             residual_cube = science_data - reconstructed_cube
 
         nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()[:, 0, :, :]
-        if save : write_fits(save + "/residual_"+way+"_"+suffix, nice_residual)
+        if save:
+            if not isdir(self.savedir): mkdir(self.savedir)
+            write_fits(self.savedir + "/residual_"+way+"_"+ self.name, nice_residual)
 
         return nice_residual
 
-    def get_evo_convergence(self, show=True, Kactiv=5, save=None, suffix=''):
+    def get_evo_convergence(self, show=True, save=False):
         """Return loss evolution"""
 
+        Kactiv = self.res["Kactiv"] + 1
         loss_evo = self.res['loss_evo']
         if show :
             fig = plt.figure("Evolution of loss criteria", figsize=(16, 9))
-            fig.subplots(1, 2, gridspec_kw={'width_ratios': [2*Kactiv, len(loss_evo)-2*Kactiv]})
+            fig.subplots(1, 2, gridspec_kw={'width_ratios': [Kactiv, len(loss_evo)-Kactiv]})
 
             plt.subplot(121), plt.xlabel("Iteration"), plt.ylabel("Loss - log scale"), plt.yscale('log')
             plt.plot(loss_evo[:Kactiv], 'X-', color="tab:orange"), plt.title("Loss evolution BEFORE activation")
@@ -657,14 +690,16 @@ class mayo_estimator:
             plt.plot(loss_evo[Kactiv:], 'X-', color="tab:blue"), plt.title("Loss evolution, AFTER activation")
             plt.xticks(range(len(loss_evo)-Kactiv), range(Kactiv, len(loss_evo)) )
 
-        if save : plt.savefig(save + "/convergence_"+suffix)
+        if save:
+            if not isdir(self.savedir): mkdir(self.savedir)
+            plt.savefig(self.savedir + "/convergence_" + self.name)
 
         return loss_evo
 
-    def get_rot_weight(self, show=True, save=None, suffix=''):
+    def get_rot_weight(self, show=True, save=False):
         """Return loss evolution"""
 
-        weight = self.ang_weight.detach().numpy()[:,0,0,0]
+        weight = self.ang_weight.detach().numpy()[:, 0, 0, 0]
         rot_angles = self.model.rot_angles
 
         if show :
@@ -673,14 +708,102 @@ class mayo_estimator:
             plt.subplot(211), plt.xlabel("Frame"), plt.ylabel("PA in deg")
             plt.plot(rot_angles, 'X-', color="tab:purple"), plt.title("Angle for each frame")
 
-            plt.subplot(212), plt.bar(range(len(weight)), weight, color="tab:cyan", edgecolor="black")
+            plt.subplot(212), plt.bar(range(len(weight)), weight,  color="tab:cyan", edgecolor="black")
             plt.title("Assigned weight"), plt.xlabel("Frame"), plt.ylabel("Frame weight")
 
-        if save : plt.savefig(save + "/PA_frame_weight_"+suffix)
+        if save:
+            if not isdir(self.savedir): mkdir(self.savedir)
+            plt.savefig(self.savedir + "/PA_frame_weight_" + self.name)
 
         return weight
 
-    def get_flux(self, show=True, save=None, suffix=''):
+
+    def mustard_results(self):
+        """Return loss evolution"""
+
+        L, X = self.res["x"]
+        cube = self.science_data
+        ang  = self.model.rot_angles
+
+        noise = self.get_residual()
+        flx, flxR = self.get_flux(show=False)
+        flx = [1] + list(flx)
+        flxR = [1] + list(flxR)
+
+        font = {'color': 'white',
+                'weight': 'bold',
+                'size': 16,
+                }
+
+        vmax = np.percentile(cube[0], 99)
+        vmin = np.percentile(cube[0], 0)
+
+        def plot_framek(val: int, show=True) -> None:
+
+            num = int(val)
+            font["size"] = 26
+            font["color"] = "white"
+
+            plt.subplot(1, 2, 1)
+            plt.imshow(cube[num], vmax=vmax, vmin=vmin, cmap='jet')
+            plt.text(20, 40, "ADI cube", font)
+            plt.title("Frame n°" + str(num))
+            font["size"] = 22
+            plt.text(20, 55, r'$\Delta$ Flux : {:+.2e}'.format(1 - flx[num]), font)
+
+            font["size"] = 22
+            plt.subplot(2, 2, 4)
+            plt.imshow(flx[num] * frame_rotate(X, ang[num]), vmax=vmax, vmin=vmin, cmap='jet')
+            plt.text(20, 40, "Rotate", font)
+
+            font["size"] = 16
+            plt.subplot(2, 4, 4)
+            plt.imshow(flxR[num] * flx[num] * L, vmax=vmax, vmin=vmin, cmap='jet')
+            plt.text(20, 40, "Static", font)
+            font["size"] = 12
+            plt.text(20, 55, r'$\Delta$ Flux : 1 {:+.2e}'.format(1 - flxR[num]), font)
+
+            font["size"] = 16
+            font["color"] = "red"
+
+            plt.subplot(2, 4, 3)
+            plt.imshow(noise[num], cmap='jet')
+            plt.clim(-np.percentile(noise[num], 98), +np.percentile(noise[num], 98))
+            plt.text(20, 40, "Random", font)
+            if show : plt.show()
+
+        # ax_slid = plt.axes([0.1, 0.25, 0.0225, 0.63])
+        # handler = Slider(ax=ax_slid, label="Frame", valmin=0, valmax=len(cube), valinit=0, orientation="vertical")
+        # handler.on_changed(plot_framek)
+
+        plt.ioff()
+        plt.figure("TMP_MUSTARD", figsize=(16, 14))
+        if not isdir(self.savedir): mkdir(self.savedir)
+        if not isdir(self.savedir+"/tmp/"): mkdir(self.savedir+"/tmp/")
+
+        images = []
+        for num in range(len(cube)):
+            plt.cla();plt.clf()
+            plot_framek(num, show=False)
+            plt.savefig(self.savedir+"/tmp/noise_" + str(num) + ".png")
+
+        for num in range(len(cube)):
+            images.append(Image.open(self.savedir+"/tmp/noise_" + str(num) + ".png"))
+
+        for num in range(len(cube)):
+            try: remove(self.savedir + "/tmp/noise_" + str(num) + ".png")
+            except Exception as e: print("[WARNING] Failed to delete iter .png : " + str(e))
+
+        try : rmdir(self.savedir+"/tmp/")
+        except Exception as e : print("[WARNING] Failed to remove iter dir : " + str(e))
+
+        images[0].save(fp=self.savedir+"MUSTARD.gif", format='GIF',
+                       append_images=images, save_all=True, duration=200, loop=0)
+
+        plt.close("TMP_MUSTARD")
+        plt.ion()
+
+    def get_flux(self, show=True, save=False):
         """Return relative flux variations between frame"""
 
         flux = self.res['flux']
@@ -688,22 +811,26 @@ class mayo_estimator:
 
         if show :
             plt.figure("Relative flux variations between frame", figsize=(16, 9))
-            lim = max(abs((flux - 1)))
-            limR = max(abs((fluxR - 1)))
+            lim = max(abs((flux-1)))
+            limR = max(abs((fluxR-1)))
+            if lim==0  : lim+= 1
+            if limR==0 : limR+= 1
 
-            plt.subplot(1, 2, 1), plt.bar(range(len(flux)), flux - 1, color='tab:red', edgecolor="black")
-            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("flux variations of starlight and speckels")
-            plt.ylim([-lim, lim])
+            plt.subplot(1, 2, 1), plt.bar(range(len(flux)), flux-1, bottom=1, color='tab:red', edgecolor="black")
+            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("Flux variations between Frames")
+            plt.ylim([1-lim, 1+lim]), plt.ticklabel_format(useOffset=False)
 
-            plt.subplot(1, 2, 2), plt.bar(range(len(fluxR)), fluxR - 1, color='tab:green', edgecolor="black")
-            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("flux variations of circonstellar object(s)")
-            plt.ylim([-limR, limR])
+            plt.subplot(1, 2, 2), plt.bar(range(len(fluxR)), fluxR-1, bottom=1, color='tab:green', edgecolor="black")
+            plt.ylabel("Flux variation"), plt.xlabel("Frame"), plt.title("Flux variations of starlight map")
+            plt.ylim([1-limR, 1+limR]), plt.ticklabel_format(useOffset=False)
 
-        if save : plt.savefig(save + "/flux_"+suffix)
+        if save:
+            if not isdir(self.savedir): mkdir(self.savedir)
+            plt.savefig(self.savedir + "/flux_" + self.name)
 
         return flux, fluxR
 
-    def get_reconstruction(self, way="direct", save=None, suffix=''):
+    def get_reconstruction(self, way="direct", save=False):
         """Return input cube and angles"""
 
         if way == "direct":
@@ -716,29 +843,34 @@ class mayo_estimator:
             reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
 
         reconstructed_cube = reconstructed_cube.detach().numpy()[:, 0, :, :]
-        if save: write_fits(save + "/reconstruction_" + way + "_" + suffix, reconstructed_cube)
+        if save:
+            if not isdir(self.savedir): mkdir(self.savedir)
+            write_fits(self.savedir + "/reconstruction_" + way + "_" + self.name, reconstructed_cube)
 
         return reconstructed_cube
 
-    def get_initialisation(self, save=None):
+    def get_initialisation(self, save=False):
         """Return input cube and angles"""
 
         if self.L0x0 is None : raise "No initialisation have been performed"
         L0, X0 = self.L0x0
 
         if save:
-            if not isdir(save): mkdir(save)
-            print("Save init from in " + save + "...")
+            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir+"/L0X0/"): mkdir(self.savedir+"/L0X0/")
+            print("Save init from in " + self.savedir+"/L0X0" + "...")
 
             nice_X0 = self.coro.numpy() * X0
             nice_X0 = (nice_X0 - np.median(nice_X0)).clip(0)
 
-            write_fits(save + "/L0.fits", L0, verbose=False)
-            write_fits(save + "/X0.fits", X0, verbose=False)
-            write_fits(save + "/nice_X0.fits", self.coro.numpy() * nice_X0, verbose=False)
+            write_fits(self.savedir+"/L0X0/" + "/L0.fits", L0, verbose=False)
+            write_fits(self.savedir+"/L0X0/" + "/X0.fits", X0, verbose=False)
+            write_fits(self.savedir+"/L0X0/" + "/nice_X0.fits", self.coro.numpy() * nice_X0, verbose=False)
 
         return L0, X0
 
+    def set_savedir(self, savedir: str):
+        self.savedir = savedir + "/mustard_out/"
 
 # %% ------------------------------------------------------------------------
 def normlizangle(angles: np.array) -> np.array:

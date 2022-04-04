@@ -63,7 +63,7 @@ class model_ADI:
         for frame_id in range(1, self.nb_frame):
             Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
             if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
-            Y[frame_id] = flux[frame_id - 1] * ReLU(L) + fluxR[frame_id - 1] * Rx
+            Y[frame_id] = flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(L) + Rx)
 
         return Y
 
@@ -82,7 +82,7 @@ class model_ADI:
         for frame_id in range(1, self.nb_frame):
             RL = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[frame_id]))
             if self.psf is not None: x = tensor_conv(ReLU(x), self.psf)
-            Y[frame_id] = flux[frame_id - 1] * RL + fluxR[frame_id - 1] * ReLU(x)
+            Y[frame_id] = flux[frame_id - 1] * (fluxR[frame_id - 1] * RL + ReLU(x))
 
         return Y
 
