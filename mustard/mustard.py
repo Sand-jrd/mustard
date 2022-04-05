@@ -413,7 +413,7 @@ class mustard_estimator:
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
         med = torch.median(science_data[torch.where(science_data*self.coro!=0)])
-        med = 0
+        # med = 0
 
         # __________________________________
         # Initialisation with max common
@@ -459,10 +459,10 @@ class mustard_estimator:
                     w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
             Rpos = torch.sum(self.ang_weight * self.coro * ReLU(Y0 - science_data - med)**2) \
-                if w_way[0] and res_pos and Ractiv else 0
+                if w_way[0] and res_pos else 0
             Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot-med) ** 2) \
-                if w_way[1] and res_pos and Ractiv else 0
-            Rpos *= 1#self.nb_frames-1 #**2 # Rpos weight
+                if w_way[1] and res_pos else 0
+            Rpos *= 1 #self.nb_frames-1 #**2 # Rpos weight
 
             if w_pcent and Ractiv :
                 w_r  = w_rp[0] * loss0 / self.regul(X0, L0)   # Auto hyperparameters
@@ -494,9 +494,9 @@ class mustard_estimator:
 
             medk = 0
             Rpos = torch.sum(self.ang_weight * self.coro * ReLU(self.model.get_Rx(Xk, fluxR_k) - science_data - medk)**2)\
-                if w_way[0] and res_pos and Ractiv else 0
+                if w_way[0] and res_pos else 0
             Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Xk - science_data_derot - medk) ** 2)  \
-                if w_way[1] and res_pos and Ractiv else 0
+                if w_way[1] and res_pos else 0
             Rpos *= 1#self.nb_frames-1#**2 #Rpos weight
 
             # Compute loss and local gradients
@@ -533,8 +533,8 @@ class mustard_estimator:
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
 
-                sub_iter = -0.5 if activ_step == "ACTIVATED" else 0
-                process_to_prints(activ_msg.format(activ_step, w_r, w_r2), sub_iter)
+                if activ_step == "AJUSTED":
+                    process_to_prints(activ_msg.format(activ_step, w_r, w_r2), -0.5)
 
         # Definition of print routines
         def process_to_prints(extra_msg=None, sub_iter=0, last=False):
@@ -542,7 +542,7 @@ class mustard_estimator:
                                                                   float(loss)), loss)
             est_info = stat_msg.split("\n", 4)[3] + '\n'
             if gif: print_iter(Lk, Xk, flux_k, k + sub_iter, est_info + iter_msg, extra_msg, save, self.coro)
-            if verbose: print(iter_msg, end=overwrite if not last else "\n")
+            if verbose: print(iter_msg, end=overwrite if not last else "\n\n")
 
         # Define the varaible to be estimated.
         if estimI == "Both":
@@ -565,7 +565,7 @@ class mustard_estimator:
         # Save & prints the first iteration
         loss_evo.append(loss)
         self.last_iter = (L0, X0, flux_0, fluxR_k) if estimI else (L0, X0)
-        if verbose : print("|it|       loss        |        R1        |        R2        |       Rpos       |       total      |")
+        if verbose : print("|it |       loss        |        R1        |        R2        |       Rpos       |       total      |")
         process_to_prints()
 
         start_time = datetime.now()
@@ -580,6 +580,7 @@ class mustard_estimator:
                 if kactiv and k == kactiv:
                     Ractiv = 1; mink = k + 2
                     activation()
+                    continue
 
                 # Descactivation
                 if kdactiv and k == kdactiv: Ractiv = 0
@@ -593,7 +594,6 @@ class mustard_estimator:
                 grad_evo.append(torch.mean(abs(Lk.grad.data)) + torch.mean(abs(Xk.grad.data)))
                 self.last_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
                 if k == 1 : self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
-                process_to_prints()
 
                 # Break point (based on gtol)
                 Lgrad, Xgrad = torch.mean(abs(Lk.grad.data)), torch.mean(abs(Xk.grad.data))
@@ -603,13 +603,15 @@ class mustard_estimator:
                         activation()
                     else : break
 
-            process_to_prints(last=True)
+                process_to_prints()
+
             ending = 'max iter reached' if k == maxiter else \
                 ("Minimum reached (loss_k==loss_k+1)" if loss == loss_evo[-1] else 'gtol reached')
 
         except KeyboardInterrupt:
             ending = "keyboard interruption"
 
+        process_to_prints(last=True)
         print("Done ("+ending+") - Running time : " + str(datetime.now() - start_time))
 
         # ______________________________________
@@ -735,8 +737,8 @@ class mustard_estimator:
                 'size': 16,
                 }
 
-        vmax = np.percentile(cube[0], 99)
-        vmin = np.percentile(cube[0], 0)
+        vmax = np.percentile(cube, 99)
+        vmin = cube.min()
 
         def plot_framek(val: int, show=True) -> None:
 
@@ -749,7 +751,7 @@ class mustard_estimator:
             plt.text(20, 40, "ADI cube", font)
             plt.title("Frame n°" + str(num))
             font["size"] = 22
-            plt.text(20, 55, r'$\Delta$ Flux : {:+.2e}'.format(1 - flx[num]), font)
+            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flx[num]), font)
 
             font["size"] = 22
             plt.subplot(2, 2, 4)
@@ -758,10 +760,10 @@ class mustard_estimator:
 
             font["size"] = 16
             plt.subplot(2, 4, 4)
-            plt.imshow(flxR[num] * flx[num] * L, vmax=vmax, vmin=vmin, cmap='jet')
+            plt.imshow(flxR[num] * flx[num]* L, vmax=vmax, vmin=vmin, cmap='jet')
             plt.text(20, 40, "Static", font)
             font["size"] = 12
-            plt.text(20, 55, r'$\Delta$ Flux : 1 {:+.2e}'.format(1 - flxR[num]), font)
+            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
 
             font["size"] = 16
             font["color"] = "red"
