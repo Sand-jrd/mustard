@@ -15,6 +15,7 @@ from vip_hci.pca import pca_fullfr, pca_annular
 from vip_hci.preproc import cube_derotate
 from vip_hci.preproc import frame_rotate
 from vip_hci.itpca import pca_it
+from vip_hci.var import frame_center
 
 import torch
 from torch.nn.functional import conv2d
@@ -179,7 +180,7 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
     return filtered
 
 
-def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
+def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
     """ Rotates Tensor using Fourier transform phases:
         Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
         See details in Larkin et al. (1997) and Hagelberg et al. (2016).
@@ -212,7 +213,14 @@ def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
         Resulting frame.
 
     """
-    y_ori, x_ori = tensor_in.shape[1:]
+    y_ori, x_ori = tensor.shape[1:]
+
+    # first convert to odd size before multiple 90deg rotations
+    if not y_ori%2 or not x_ori%2:
+        tensor_in = torch.zeros([1, tensor.shape[1]+1, tensor.shape[2]+1])
+        tensor_in[0, :-1, :-1] = tensor
+    else:
+        tensor_in = tensor
 
     while angle < 0:
         angle += 360
@@ -228,29 +236,28 @@ def tensor_rotate_fft(tensor_in: torch.Tensor, angle: float) -> torch.Tensor:
     else:
         dangle = angle
 
-    if y_ori % 2 or x_ori % 2:
-        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
-        tensor_in = tensor_in[0, :-1, :-1]
-
-    y_ori, x_ori = tensor_in.shape[1:]
+    tensor_in = tensor_in[:, :-1, :-1]
 
     a = np.tan(np.deg2rad(dangle) / 2).item()
     b = -np.sin(np.deg2rad(dangle)).item()
 
-    arr_xy = torch.from_numpy(np.mgrid[0:y_ori, 0:x_ori])
-    arr_xy -= x_ori // 2
+    y_new, x_new = tensor_in.shape[1:]
+    arr_xy = torch.from_numpy(np.mgrid[0:y_new, 0:x_new])
+    cy, cx = frame_center(tensor)
+    arr_y = arr_xy[0] - cy
+    arr_x = arr_xy[1] - cx
 
-    s_x = tensor_fft_shear(tensor_in, arr_xy[1], a, ax=2)
-    s_xy = tensor_fft_shear(s_x, arr_xy[0], b, ax=1)
-    s_xyx = tensor_fft_shear(s_xy, arr_xy[1], a, ax=2)
+    s_x = tensor_fft_shear(tensor_in, arr_x, a, ax=2)
+    s_xy = tensor_fft_shear(s_x, arr_y, b, ax=1)
+    s_xyx = tensor_fft_shear(s_xy, arr_x, a, ax=2)
 
     if y_ori % 2 or x_ori % 2:
-        # shift + crop back to odd dimensions , using FFT
-        array_out = torch.zeros([s_xyx.shape[0] + 1, s_xyx.shape[1] + 1])
-        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
-        array_out[:-1, :-1] = torch.real(s_xyx)
+        # set it back to original dimensions
+        array_out = torch.zeros([1, s_xyx.shape[1]+1, s_xyx.shape[2]+1])
+        array_out[0, :-1, :-1] = torch.real(s_xyx)
     else:
-        array_out = torch.real(s_xyx)
+        array_out = torch.zeros([1, s_xyx.shape[1], s_xyx.shape[2]])
+        array_out[0, :, :] = torch.real(s_xyx)
 
     return array_out
 

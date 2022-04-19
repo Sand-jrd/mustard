@@ -16,7 +16,7 @@ ______________________________
 from vip_hci.fits import open_fits, write_fits
 from vip_hci.preproc import cube_derotate, frame_rotate
 
-from os import mkdir, remove, rmdir
+from os import makedirs, remove, rmdir
 from os.path import isdir
 
 # Algo and science model
@@ -182,7 +182,7 @@ class mustard_estimator:
             print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
 
             if save:
-                if not isdir(self.savedir + "/L0X0/"): mkdir(self.savedir + "/L0X0/")
+                if not isdir(self.savedir + "/L0X0/"): makedirs(self.savedir + "/L0X0/")
                 print("Save init from in " + self.savedir + "/L0X0/" + "...")
 
                 nice_X0 = self.coro.numpy() * X0
@@ -380,7 +380,7 @@ class mustard_estimator:
         # For verbose, saving, configuration info sortage
         estimI = estimI.capitalize()
         self.name = '_' + suffix if suffix else ''
-        self.savedir = save + "/mustard_out/" if isinstance(save, str) else "./mustard_out/"
+        self.savedir = save if isinstance(save, str) else "./mustard_out"+self.name+"/"
         self.config[4] = estimI + "X and L" if estimI=="Both" else estimI
         overwrite = "\n" if history else "\r"
 
@@ -642,7 +642,7 @@ class mustard_estimator:
         if gif : iter_to_gif(save, self.name)
 
         if save :
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/L_est"+self.name, L_est), write_fits(self.savedir + "/X_est"+self.name, X_est)
             if estimI :
                 write_fits(self.savedir + "/flux"+self.name, flux)
@@ -671,7 +671,7 @@ class mustard_estimator:
 
         nice_residual = self.coro.detach().numpy() *  residual_cube.detach().numpy()[:, 0, :, :]
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/residual_"+way+"_"+ self.name, nice_residual)
 
         return nice_residual
@@ -693,7 +693,7 @@ class mustard_estimator:
             plt.xticks(range(len(loss_evo)-Kactiv), range(Kactiv, len(loss_evo)) )
 
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/convergence_" + self.name)
 
         return loss_evo
@@ -714,7 +714,7 @@ class mustard_estimator:
             plt.title("Assigned weight"), plt.xlabel("Frame"), plt.ylabel("Frame weight")
 
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/PA_frame_weight_" + self.name)
 
         return weight
@@ -780,8 +780,8 @@ class mustard_estimator:
 
         plt.ioff()
         plt.figure("TMP_MUSTARD", figsize=(16, 14))
-        if not isdir(self.savedir): mkdir(self.savedir)
-        if not isdir(self.savedir+"/tmp/"): mkdir(self.savedir+"/tmp/")
+        if not isdir(self.savedir): makedirs(self.savedir)
+        if not isdir(self.savedir+"/tmp/"): makedirs(self.savedir+"/tmp/")
 
         images = []
         for num in range(len(cube)):
@@ -827,7 +827,7 @@ class mustard_estimator:
             plt.ylim([1-limR, 1+limR]), plt.ticklabel_format(useOffset=False)
 
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/flux_" + self.name)
 
         return flux, fluxR
@@ -846,7 +846,7 @@ class mustard_estimator:
 
         reconstructed_cube = reconstructed_cube.detach().numpy()[:, 0, :, :]
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
+            if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/reconstruction_" + way + "_" + self.name, reconstructed_cube)
 
         return reconstructed_cube
@@ -858,8 +858,8 @@ class mustard_estimator:
         L0, X0 = self.L0x0
 
         if save:
-            if not isdir(self.savedir): mkdir(self.savedir)
-            if not isdir(self.savedir+"/L0X0/"): mkdir(self.savedir+"/L0X0/")
+            if not isdir(self.savedir): makedirs(self.savedir)
+            if not isdir(self.savedir+"/L0X0/"): makedirs(self.savedir+"/L0X0/")
             print("Save init from in " + self.savedir+"/L0X0" + "...")
 
             nice_X0 = self.coro.numpy() * X0
