@@ -65,7 +65,7 @@ def circle(shape: tuple, r: float, offset=(0.5, 0.5)):
     w, l = shape
     for x in range(0, w):
         for y in range(0, l):
-            if pow(x - (w / 2) + offset[0], 2) + pow(y - (l / 2) + offset[1], 2) < pow(r, 2):
+            if pow(x - (w // 2) + offset[0], 2) + pow(y - (l // 2) + offset[1], 2) < pow(r, 2):
                 M[x, y] = 1
 
     if nb_f: M = np.tile(M, (nb_f, 1, 1))
@@ -126,7 +126,7 @@ def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_c
 def gaussian(shape, sigma = 1, mu = 0) :
     x, y = np.meshgrid(np.linspace(-1, 1, shape[0]), np.linspace(-1, 1, shape[1]))
     dst = np.sqrt(x * x + y * y)
-    return np.exp(-((dst - mu) ** 2 / (2.0 * sigma ** 2)))
+    return abs(np.exp(-((dst - mu) ** 2 / (2.0 * sigma ** 2))))
 
 
 # %% Manage files

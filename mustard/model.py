@@ -10,7 +10,7 @@ ______________________________
 
 @author: sand-jrd
 """
-import numpy
+
 import numpy as np
 import torch
 from mustard.algo import tensor_rotate_fft, tensor_conv
@@ -58,12 +58,12 @@ class model_ADI:
 
         # First image. No intensity vector
         Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
-        Y[0] = ReLU(L) + Rx
+        Y[0] =  ReLU(L + Rx)
 
         for frame_id in range(1, self.nb_frame):
             Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
             if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
-            Y[frame_id] = flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(L) + Rx)
+            Y[frame_id] =  ReLU(flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(L) + Rx))
 
         return Y
 
@@ -76,29 +76,42 @@ class model_ADI:
         Y = torch.zeros((self.nb_frame,) + L.shape).double()
 
         # First image. No intensity vector
-        Rl = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[0]))
-        Y[0] = Rl + self.coro * ReLU(x)
+        Rl = tensor_rotate_fft(L, -float(self.rot_angles[0]))
+        Y[0] = ReLU(Rl) + self.coro * ReLU(x)
 
         for frame_id in range(1, self.nb_frame):
             RL = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[frame_id]))
             if self.psf is not None: x = tensor_conv(ReLU(x), self.psf)
-            Y[frame_id] = flux[frame_id - 1] * (fluxR[frame_id - 1] * RL + ReLU(x))
+            Y[frame_id] = ReLU(flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(RL) + ReLU(x)))
 
         return Y
 
-    def get_Rx(self, x: torch.Tensor, flux=None) -> torch.Tensor:
+    def get_Lf(self, L: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
 
-        Rx = torch.zeros((self.nb_frame,) + self.frame_shape).double()
+        Lf = torch.zeros((self.nb_frame, 1) + self.frame_shape).double()
         if flux is None: flux = torch.ones(self.nb_frame - 1)
-        Rx[0] = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
+        if fluxR is None: fluxR = torch.ones(self.nb_frame - 1)
+        Lf[0] = ReLU(L)
 
         for frame_id in range(1, self.nb_frame):
-            Rx[frame_id] = flux[frame_id - 1] * tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
+            Lf[frame_id] = fluxR[frame_id - 1] * flux[frame_id - 1] * ReLU(L)
+
+        return  Lf
+
+    def get_Rx(self, x: torch.Tensor, flux=None, inverse=False) -> torch.Tensor:
+
+        sgn = -1 if inverse else 1
+        Rx = torch.zeros((self.nb_frame, 1) + self.frame_shape).double()
+        if flux is None: flux = torch.ones(self.nb_frame - 1)
+        Rx[0] = tensor_rotate_fft(ReLU(x), sgn*float(self.rot_angles[0]))
+
+        for frame_id in range(1, self.nb_frame):
+            Rx[frame_id] =  ReLU(flux[frame_id - 1] * tensor_rotate_fft(ReLU(x), sgn*float(self.rot_angles[frame_id])))
 
         return Rx
 
 
-def pad_psf(M: numpy.array, shape) -> numpy.array:
+def pad_psf(M: np.array, shape) -> np.array:
     """Pad with 0 the PSF if it is too small """
     if M.shape[0] % 2:
         raise ValueError("PSF shape should be wise : psf must be centred on 4pix not one")

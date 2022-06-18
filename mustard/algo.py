@@ -180,6 +180,42 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
     return filtered
 
 
+def gaussian_tensor_conv(tensor: torch.Tensor, k_size = 5) -> torch.Tensor:
+    """
+    Apply 3x3 gaussian filter on input tensor X
+
+    Parameters
+    ----------
+    tensor : torch.tensor
+        input tensor
+
+    k_size : int
+        kenrel size
+
+    Returns
+    -------
+    torch.Tensor
+
+    """
+
+    if k_size == 3 :
+        kernel = np.array([[[1, 2, 1],
+                            [2, 4, 2],
+                            [1, 2, 1]]], dtype='float64')
+    elif k_size == 5:
+        kernel = np.array([[[1,  4,  6,  4, 1],
+                            [4, 18, 30, 18, 4],
+                            [6, 30, 48, 30, 6],
+                            [4, 18, 30, 18, 4],
+                            [1,  4,  6,  4, 1]]], dtype='float64')
+    else : raise(ValueError("Kernel size can be {3,5}"))
+
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+    filtered = conv2d(tensor, kernel, padding='same')
+
+    return filtered
+
+
 def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
     """ Rotates Tensor using Fourier transform phases:
         Rotation = 3 consecutive lin. shears = 3 consecutive FFT phase shifts
@@ -202,7 +238,7 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
 
     Parameters
     ----------
-    tensor_in : torch.Tensor
+    tensor : torch.Tensor
         Input image, 2d array.
     angle : float
         Rotation angle.
@@ -215,13 +251,6 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
     """
     y_ori, x_ori = tensor.shape[1:]
 
-    # first convert to odd size before multiple 90deg rotations
-    if not y_ori%2 or not x_ori%2:
-        tensor_in = torch.zeros([1, tensor.shape[1]+1, tensor.shape[2]+1])
-        tensor_in[0, :-1, :-1] = tensor
-    else:
-        tensor_in = tensor
-
     while angle < 0:
         angle += 360
     while angle > 360:
@@ -232,18 +261,21 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         if dangle > 45:
             dangle = -(90 - dangle)
         nangle = int(np.rint(angle / 90))
-        tensor_in = torch.rot90(tensor_in, nangle, [1, 2])
+        tensor_in = torch.rot90(tensor, nangle, [1, 2])
     else:
         dangle = angle
+        tensor_in = tensor.clone()
 
-    tensor_in = tensor_in[:, :-1, :-1]
+    if y_ori%2 or x_ori%2:
+        # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
+        tensor_in = tensor_in[:, :-1, :-1]
 
     a = np.tan(np.deg2rad(dangle) / 2).item()
     b = -np.sin(np.deg2rad(dangle)).item()
 
     y_new, x_new = tensor_in.shape[1:]
     arr_xy = torch.from_numpy(np.mgrid[0:y_new, 0:x_new])
-    cy, cx = frame_center(tensor)
+    cy, cx = frame_center(tensor[0])
     arr_y = arr_xy[0] - cy
     arr_x = arr_xy[1] - cx
 
@@ -257,7 +289,7 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         array_out[0, :-1, :-1] = torch.real(s_xyx)
     else:
         array_out = torch.zeros([1, s_xyx.shape[1], s_xyx.shape[2]])
-        array_out[0, :, :] = torch.real(s_xyx)
+        array_out = torch.real(s_xyx)
 
     return array_out
 
