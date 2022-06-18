@@ -312,6 +312,99 @@ def tensor_fft_shear(arr, arr_ori, c, ax):
     return s_x
 
 
+def tensor_fft_scale(array, scale, ori_dim=True):
+    """
+    Resample the frames of a cube with a single scale factor using a FFT-based
+    method.
+    Parameters
+    ----------
+    array : 3d tensor
+        Input cube, 3d array.
+    scale : int or float
+        Scale factor for upsampling or downsampling the frames in the cube. If
+        a tuple it corresponds to the scale along x and y.
+    ori_dim: bool, opt
+        Whether to crop/pad scaled array in order to have the output with the
+        same dimensions as the input array. By default, the x,y dimensions of
+        the output are the closest integer to scale*dim_input, with the same
+        parity as the input.
+    Returns
+    -------
+    array_resc : numpy ndarray
+        Output cube with resampled frames.
+    """
+    if scale == 1:
+        return array
+    dim = array.shape[0]  # even square
+
+    kd_array = torch.arange(dim/2 + 1, dtype=int)
+
+    # scaling factor chosen as *close* as possible to N''/N', where:
+    #   N' = N + 2*KD (N': dim after FT)
+    #   N" = N + 2*KF (N'': dim after FT-1 of FT image),
+    #   => N" = 2*round(N'*sc/2)
+    #   => KF = (N"-N)/2 = round(N'*sc/2 - N/2)
+    #         = round(N/2*(sc-1) + KD*sc)
+    # We call yy=N/2*(sc-1) +KD*sc
+    yy = dim/2 * (scale - 1) + kd_array.double() * scale
+
+    # We minimize the difference between the `ideal' N" and its closest
+    # integer value by minimizing |yy-int(yy)|.
+    kf_array = torch.round(yy).int()
+    tmp = torch.abs(yy-kf_array)
+    imin = torch.argmin(tmp)  #Nan values not handled
+
+    kd_io = kd_array[imin]
+    kf_io = kf_array[imin]
+
+    # Extract a part of array and place into dim_p array
+    dim_p = int(dim + 2*kd_io)
+    tmp = torch.zeros((dim_p, dim_p)).double()
+    tmp[kd_io:kd_io+dim, kd_io:kd_io+dim] = array
+
+    # Fourier-transform the larger array
+    array_f = tf.fftshift(tf.fft2(tmp))
+
+    # Extract a part of, or expand, the FT to dim_pp pixels
+    dim_pp = int(dim + 2*kf_io)
+
+    if dim_pp > dim_p:
+        tmp = torch.zeros((dim_pp, dim_pp), dtype=torch.cfloat)
+        tmp[(dim_pp-dim_p)//2:(dim_pp+dim_p)//2,
+            (dim_pp-dim_p)//2:(dim_pp+dim_p)//2] = array_f
+    else:
+        tmp = array_f[kd_io-kf_io:kd_io-kf_io+dim_pp,
+                      kd_io-kf_io:kd_io-kf_io+dim_pp]
+
+    # inverse Fourier-transform the FT
+    tmp = tf.ifft2(tf.fftshift(tmp))
+    array_resc = tmp.real
+    del tmp
+
+    # Extract a part of or expand the scaled image to desired number of pixels
+    dim_resc = int(round(scale*dim))
+    if dim_resc > dim and dim_resc % 2 != dim % 2:
+        dim_resc += 1
+    elif dim_resc < dim and dim_resc % 2 != dim % 2:
+        dim_resc -= 1  # for reversibility
+
+    if not ori_dim and dim_pp > dim_resc:
+        array_resc = array_resc[(dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2,
+                                (dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2]
+    elif not ori_dim and dim_pp <= dim_resc:
+        array = torch.zeros((dim_resc, dim_resc)).double()
+        array[(dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2,
+              (dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2] = array_resc
+        array_resc = array
+    elif dim_pp > dim:
+        array_resc = array_resc[kf_io:kf_io+dim, kf_io:kf_io+dim]
+    elif dim_pp <= dim:
+        scaled = array*0
+        scaled[-kf_io:-kf_io+dim_pp, -kf_io:-kf_io+dim_pp] = array_resc
+        array_resc = scaled
+
+    array_resc /= scale * scale
+    return array_resc
+
 def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    return torch.abs(torch.fft.ifftshift(torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) *
-                                                         torch.fft.fftshift(torch.fft.fft2(y)))))
+    return torch.abs(tf.ifftshift(tf.ifft2(tf.fftshift(tf.fft2(x)) * tf.fftshift(tf.fft2(y)))))
