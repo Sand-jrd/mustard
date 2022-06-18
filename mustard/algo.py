@@ -335,8 +335,16 @@ def tensor_fft_scale(array, scale, ori_dim=True):
     """
     if scale == 1:
         return array
-    dim = array.shape[0]  # even square
 
+    if array.shape[0] % 2:
+        odd = True
+        array_even = torch.zeros([array.shape[0] + 1, array.shape[1] + 1])
+        array_even[1:, 1:] = array
+        array = array_even
+    else:
+        odd = False
+
+    dim = array.shape[0]  # even square
     kd_array = torch.arange(dim/2 + 1, dtype=int)
 
     # scaling factor chosen as *close* as possible to N''/N', where:
@@ -404,6 +412,12 @@ def tensor_fft_scale(array, scale, ori_dim=True):
         array_resc = scaled
 
     array_resc /= scale * scale
+
+    if odd:
+        array_tmp = torch.zeros([array_resc.shape[0] - 1, array_resc.shape[1] - 1])
+        array_tmp = array_resc[1:, 1:]
+        array_resc = array_tmp
+
     return array_resc
 
 def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
