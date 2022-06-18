@@ -32,7 +32,7 @@ from torch.nn import ReLU as relu_constr
 
 # Other
 from mustard.utils import circle, iter_to_gif, print_iter
-from mustard.model import model_ADI
+from mustard.model import model_ADI, model_ASDI
 from copy import deepcopy
 
 # -- For verbose -- #
@@ -69,7 +69,8 @@ def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -
 class mustard_estimator:
     """ Neo-mayo Algorithm main class  """
 
-    def __init__(self, science_data: np.ndarray, angles :np.ndarray, coro=6, pupil="edge", psf=None, Badframes=None):
+    def __init__(self, science_data: np.ndarray, angles: np.ndarray, scale: None or np.ndarray, coro=6, pupil="edge",
+                 psf=None, Badframes=None):
         """
         Initialisation of estimator object
 
@@ -78,8 +79,11 @@ class mustard_estimator:
         science_data : np.ndarray
             ADI cube. The first dimensions should be the number of frames.
 
-        angles : np.ndarray
+        angles : np.array
             List of angles. Should be the same size as the ADI cube 1st dimension (number of frames)
+
+        scale : np.array
+            List of scaling coeff for SDI
 
         coro : int or str
             Size of the coronograph
@@ -102,6 +106,8 @@ class mustard_estimator:
         if Badframes is not None:
             science_data = np.delete(science_data, Badframes, 0)
             angles = np.delete(angles, Badframes, 0)
+            scale = np.delete(scale, Badframes, 0)
+
 
         # Constants
         self.shape = science_data[0].shape
@@ -128,7 +134,9 @@ class mustard_estimator:
         # Convert to tensor
         rot_angles = normlizangle(angles)
         self.science_data = science_data
-        self.model = model_ADI(rot_angles, self.coro, psf)
+        self.model = model_ADI(rot_angles, scale, self.coro, psf)
+        self.model = model_ASDI(rot_angles, scale, self.coro, psf) if scale \
+            else model_ADI(rot_angles, scale, self.coro, psf)
 
         # Will be filled with weight if anf_weight option is activated
         self.ang_weight = torch.from_numpy(np.ones(self.nb_frames).reshape((self.nb_frames, 1, 1, 1))).double()
@@ -488,7 +496,7 @@ class mustard_estimator:
         # Model and loss at step 0
         with torch.no_grad():
 
-            Y0 = self.model.forward_ADI(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
+            Y0 = self.model.forward(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
             Y0_reverse = self.model.forward_ADI_reverse(L0, X0, flux_0, fluxR_0) if w_way[1] else 0
 
             loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
@@ -534,7 +542,7 @@ class mustard_estimator:
             optimizer.zero_grad()  # Reset gradients
 
             # Compute model(s)
-            Yk = self.model.forward_ADI(Lk, Xk, flux_k, fluxR_k) if w_way[0] else 0
+            Yk = self.model.forward(Lk, Xk, flux_k, fluxR_k) if w_way[0] else 0
             Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k, fluxR_k) if w_way[1] else 0
 
             # Compute regularization(s)
@@ -747,7 +755,7 @@ class mustard_estimator:
 
         if way == "direct" :
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-            reconstructed_cube = self.model.forward_ADI(*self.last_iter)  # Reconstruction on last iteration
+            reconstructed_cube = self.model.forward(*self.last_iter)  # Reconstruction on last iteration
             residual_cube = science_data - reconstructed_cube
 
         elif way == "reverse":
@@ -1110,7 +1118,7 @@ class mustard_estimator:
 
         if way == "direct":
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-            reconstructed_cube = self.model.forward_ADI(*self.last_iter)  # Reconstruction on last iteration
+            reconstructed_cube = self.model.forward(*self.last_iter)  # Reconstruction on last iteration
 
         elif way == "reverse":
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
