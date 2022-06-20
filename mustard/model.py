@@ -17,9 +17,10 @@ from mustard.algo import tensor_rotate_fft, tensor_conv, tensor_fft_scale
 from torch.nn import ReLU as reluConstr
 ReLU = reluConstr()
 
-class Image_formation_model:
+class Cube_model():
 
     def __init__(self, rot_angles: np.array, coro: np.array, psf: None or np.array):
+
         # -- Constants
         # Sizes
         self.nb_rframe = len(rot_angles)
@@ -44,7 +45,7 @@ class Image_formation_model:
         return None
 
 # %% Forward ADI model :
-class model_ADI(Image_formation_model):
+class model_ADI(Cube_model):
     """ Forward models
         
             Y = L + R(x)
@@ -120,7 +121,7 @@ class model_ADI(Image_formation_model):
 
 
 # %% Forward ADI model :
-class model_ASDI(Image_formation_model):
+class model_ASDI(Cube_model):
     """ Forward models as presented in mayo
 
             Y = scale_k(L) + R_j(x)

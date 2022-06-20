@@ -138,3 +138,6 @@ dmypy.json
 *.gif
 iter/
 example-data/
+tests/
+
+demo.*

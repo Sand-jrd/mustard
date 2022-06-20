@@ -42,7 +42,7 @@ import warnings
 from PIL import Image
 
 sep = ('_' * 50)
-
+head = "|it |       loss        |        R1        |        R2        |       Rpos       |       total      |"
 info_iter = "|{:^3}|{:.6e} ({:^3.0f}%)|{:.6e} ({:^2.0f}%)|{:.6e} ({:^2.0f}%)|{:.6e} ({:^2.0f}%)|{:.12e}|"
 
 init_msg = sep + "\nResolving IP-ADI optimization problem - name : {}" +\
@@ -50,9 +50,9 @@ init_msg = sep + "\nResolving IP-ADI optimization problem - name : {}" +\
                  "\nRegul R1 : '{}' and R2 : '{}'" +\
                  "\n{} deconvolution and {} frame weighted based on rotations" + \
                  "\nRelative amplitude of {} will be estimated" + \
-                 "\nRegul weight are set to w_r={:.2e} and w_r2={:.2e}, maxiter={}\n"
+                 "\nRegul weight are set to w_r={:.2f}% and w_r2={:.2f}%, maxiter={}\n"
 
-activ_msg = "REGUL HAVE BEEN {} with w_r={:.2e} and w_r2={:.2e}"
+activ_msg = "REGUL HAVE BEEN {} with w_r={:.2f} and w_r2={:.2f}"
 
 ReLU = relu_constr()
 
@@ -69,7 +69,7 @@ def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -
 class mustard_estimator:
     """ Neo-mayo Algorithm main class  """
 
-    def __init__(self, science_data: np.ndarray, angles: np.ndarray, scale: None or np.ndarray, coro=6, pupil="edge",
+    def __init__(self, science_data: np.ndarray, angles: np.ndarray, scale=None, coro=6, pupil="edge",
                  psf=None, Badframes=None):
         """
         Initialisation of estimator object
@@ -82,7 +82,7 @@ class mustard_estimator:
         angles : np.array
             List of angles. Should be the same size as the ADI cube 1st dimension (number of frames)
 
-        scale : np.array
+        scale : np.array or None
             List of scaling coeff for SDI
 
         coro : int or str
@@ -134,9 +134,8 @@ class mustard_estimator:
         # Convert to tensor
         rot_angles = normlizangle(angles)
         self.science_data = science_data
-        self.model = model_ADI(rot_angles, scale, self.coro, psf)
         self.model = model_ASDI(rot_angles, scale, self.coro, psf) if scale \
-            else model_ADI(rot_angles, scale, self.coro, psf)
+            else model_ADI(rot_angles, self.coro, psf)
 
         # Will be filled with weight if anf_weight option is activated
         self.ang_weight = torch.from_numpy(np.ones(self.nb_frames).reshape((self.nb_frames, 1, 1, 1))).double()
@@ -151,7 +150,7 @@ class mustard_estimator:
         self.configR1(mode="smooth")
 
         self.res = None; self.last_iter = None; self.first_iter = None; self.final_estim = None
-        self.ambiguities = None; self.speckles = None; self.science_data_ori=None; # init results vars
+        self.ambiguities = None; self.speckles = None; self.science_data_ori=None # init results vars
 
     def set_init(self, X0 = None, L0 = None):
         """
@@ -168,13 +167,14 @@ class mustard_estimator:
         -------
 
         """
-        if   X0 is None :
+        if L0 is None and X0 is None:
+            raise(AssertionError("At least one argument must be provided"))
+
+        if X0 is None :
             X0 = np.min(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
         elif L0 is None :
             L0 = np.min(self.science_data -
                         cube_derotate(np.tile(X0, (self.nb_frames, 1, 1)), -self.model.rot_angles), 0)
-        else : 
-            raise(AssertionError("At least one argument must be provided"))
 
         self.L0x0 = (L0, X0)
 
@@ -484,8 +484,8 @@ class mustard_estimator:
 
         L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
         X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
-        flux_0 = torch.ones(self.model.nb_frame - 1)
-        fluxR_0 = torch.ones(self.model.nb_frame - 1)
+        flux_0 = torch.ones(self.model.nb_rframe - 1)
+        fluxR_0 = torch.ones(self.model.nb_rframe - 1)
 
         # ______________________________________
         #  Init variables and optimizer
@@ -532,6 +532,11 @@ class mustard_estimator:
             loss0 += (R1_0 + R2_0 + Rpos)
 
         loss, R1, R2 = loss0, R1_0, R2_0
+
+        # Starting minization soon ...
+        stat_msg = init_msg.format(self.name, save, *self.config, w_r, w_r2, str(maxiter))
+        if verbose: print(stat_msg)
+        txt_msg = stat_msg
 
         # ____________________________________
         # Nested functions
@@ -612,8 +617,11 @@ class mustard_estimator:
 
         # Definition of print routines
         def process_to_prints(extra_msg=None, sub_iter=0, last=False):
+            nonlocal txt_msg
             iter_msg = info_iter.format(k + sub_iter, *loss_ratio(Ractiv, float(R1),float(R2), float(Rpos),
                                                                   float(loss)), loss)
+            if extra_msg is not None : txt_msg += "\n" + extra_msg
+            txt_msg += "\n" + iter_msg
             est_info = stat_msg.split("\n", 4)[3] + '\n'
             if gif: print_iter(Lk, Xk, flux_k, k + sub_iter, est_info + iter_msg, extra_msg, save, self.coro)
             if verbose: print(iter_msg, end=overwrite if not last else "\n\n")
@@ -640,14 +648,11 @@ class mustard_estimator:
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
-        # Starting minization soon ...
-        stat_msg = init_msg.format(self.name, save, *self.config, w_r, w_r2, str(maxiter))
-        if verbose: print(stat_msg)
-
         # Save & prints the first iteration
         loss_evo.append(loss)
         self.last_iter = (L0, X0, flux_0, fluxR_k) if estimI else (L0, X0)
-        if verbose : print("|it |       loss        |        R1        |        R2        |       Rpos       |       total      |")
+        if verbose: print(head)
+        txt_msg += "\n" + head
         process_to_prints()
 
         start_time = datetime.now()
@@ -696,7 +701,9 @@ class mustard_estimator:
             ending = "keyboard interruption"
 
         process_to_prints(last=True)
-        print("Done ("+ending+") - Running time : " + str(datetime.now() - start_time))
+        end_msg = "Done ("+ending+") - Running time : " + str(datetime.now() - start_time)
+        if verbose: print(end_msg)
+        txt_msg += "\n\n" + end_msg
 
         # ______________________________________
         # Done, store and unwrap results back to numpy array!
@@ -729,6 +736,7 @@ class mustard_estimator:
         if save :
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/L_est"+self.name, L_est), write_fits(self.savedir + "/X_est"+self.name, X_est)
+            with open(self.savedir + "/config.txt", 'w') as f:  f.write(txt_msg)
             if estimI :
                 write_fits(self.savedir + "/flux"+self.name, flux)
                 write_fits(self.savedir + "/fluxR"+self.name, fluxR)
