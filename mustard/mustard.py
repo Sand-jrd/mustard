@@ -20,7 +20,7 @@ from os import makedirs, remove, rmdir
 from os.path import isdir
 
 # Algo and science model
-from mustard.algo import init_estimate, sobel_tensor_conv, gaussian_tensor_conv
+from mustard.algo import init_estimate, sobel_tensor_conv, convert_to_mask
 import torch
 import numpy as np
 
@@ -70,7 +70,7 @@ class mustard_estimator:
     """ Neo-mayo Algorithm main class  """
 
     def __init__(self, science_data: np.ndarray, angles: np.ndarray, scale=None, coro=6, pupil="edge",
-                 psf=None, Badframes=None):
+                 psf=None, Badframes=None, savedir='./'):
         """
         Initialisation of estimator object
 
@@ -99,6 +99,9 @@ class mustard_estimator:
 
         Badframes : tuple or list or None
             Bad frames that you will not be taken into account
+
+        savedir : str
+            Path for outputs
         """
 
         # -- Create model and define constants --
@@ -111,10 +114,11 @@ class mustard_estimator:
 
         # Constants
         self.shape = science_data[0].shape
-        self.nb_frames = science_data.shape[0]
+        self.nb_frame = science_data.shape[0]
         self.L0x0 = None
         self.mask = 1  # R2 mask default. Will be set if call R2 config
-        self.name = None
+        self.name = ''
+        self.savedir = savedir
 
         # Coro and pupil masks
         pupilR = pupil
@@ -137,8 +141,11 @@ class mustard_estimator:
         self.model = model_ASDI(rot_angles, scale, self.coro, psf) if scale \
             else model_ADI(rot_angles, self.coro, psf)
 
+        if self.model.nb_frame != self.model.nb_frame :
+            raise("Length of angles/scales does not match the size of the science-data cube !")
+
         # Will be filled with weight if anf_weight option is activated
-        self.ang_weight = torch.from_numpy(np.ones(self.nb_frames).reshape((self.nb_frames, 1, 1, 1))).double()
+        self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double()
 
 
         self.coro  = torch.from_numpy(self.coro).double()
@@ -174,7 +181,7 @@ class mustard_estimator:
             X0 = np.min(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
         elif L0 is None :
             L0 = np.min(self.science_data -
-                        cube_derotate(np.tile(X0, (self.nb_frames, 1, 1)), -self.model.rot_angles), 0)
+                        cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
 
         self.L0x0 = (L0, X0)
 
@@ -259,7 +266,7 @@ class mustard_estimator:
         if smoothL : self.regul = lambda X, L: self.smooth(X) + self.p_L*self.smooth(L)
         else       : self.regul = lambda X, L: self.smooth(X)
 
-    def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False):
+    def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False, save=True):
         """ Configuration for Second regularization.
         Two possible mode :   R = M*X      (mode 'mask')
                            or R = dist(M-X) (mode 'dist')
@@ -297,6 +304,10 @@ class mustard_estimator:
         -------
 
         """
+        if mode == "pdi":
+            Msk = convert_to_mask(Msk)
+            mode = "mask"
+
         if mode != 'l1' :
             if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
             if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
@@ -318,7 +329,7 @@ class mustard_estimator:
             elif penaliz in ("Both", "B"):  self.regul2 = lambda X, L, M: sign * (tsum( rM * (M - X) ** 2) -
                                                                                   tsum( rM * (M - L) ** 2))
 
-        elif mode == "mask":
+        elif mode == "mask" :
             Msk = Msk/torch.max(Msk)  # Normalize mask
             self.mask = (1-Msk) if invert else Msk
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum( rM * (M * X) ** 2)
@@ -338,6 +349,10 @@ class mustard_estimator:
         R2_name = mode + " on " + penaliz
         R2_name += " inverted" if invert else ""
         self.config[1] = R2_name
+
+        if save and mode != "l1" :
+            if not isdir(self.savedir): makedirs(self.savedir)
+            write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
 
     def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI="Both", med_sub=False, weighted_rot=True, res_pos=False,
                  w_way=(0, 1), maxiter=10, gtol=1e-10, kactiv=0, kdactiv=None, save="./", suffix = '', gif=False,
@@ -441,7 +456,7 @@ class mustard_estimator:
         if weighted_rot :
             self.config[3] = "with"
             ang_weight = compute_rot_weight(self.model.rot_angles)
-            self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frames, 1, 1, 1))).double()
+            self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frame, 1, 1, 1))).double()
 
         # ______________________________________
         # Define constantes and convert arry to tensor
@@ -449,7 +464,7 @@ class mustard_estimator:
         # Med sub
         if med_sub :
             meds = np.median(self.coro * self.science_data, (1, 2))
-            for frame in range(self.nb_frames) :
+            for frame in range(self.nb_frame) :
                 self.science_data[frame] = (self.science_data[frame] - meds[frame]).clip(0)
 
         if min_sub: self.decompose()
@@ -469,11 +484,11 @@ class mustard_estimator:
 
         elif init_maxL :
             res = np.min(self.science_data, 0)
-            R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frames, 1, 1)), -self.model.rot_angles)
+            R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
             self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
         else :
             res  = np.min(science_data_derot_np, 0)
-            L_fr = self.science_data - cube_derotate(np.tile(res, (self.nb_frames, 1, 1)), self.model.rot_angles)
+            L_fr = self.science_data - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles)
             self.L0x0 = np.mean(L_fr, axis=0), res
 
         L0, X0 = self.L0x0[0], self.L0x0[1]
@@ -484,8 +499,8 @@ class mustard_estimator:
 
         L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
         X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
-        flux_0 = torch.ones(self.model.nb_rframe - 1)
-        fluxR_0 = torch.ones(self.model.nb_rframe - 1)
+        flux_0 = torch.ones(self.model.nb_frame - 1)
+        fluxR_0 = torch.ones(self.model.nb_frame - 1)
 
         # ______________________________________
         #  Init variables and optimizer
@@ -513,7 +528,7 @@ class mustard_estimator:
                 # if w_way[0] and res_pos else 0
                 # Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot-med) ** 2) \
                     # if w_way[1] and res_pos else 0
-                Rpos *= 1#self.nb_frames-1 #self.nb_frames-1 #**2 # Rpos weight
+                Rpos *= 1#self.nb_frame-1 #self.nb_frame-1 #**2 # Rpos weight
             else : Rpos = 0
 
             if w_pcent and Ractiv : # Auto hyperparameters
@@ -561,7 +576,7 @@ class mustard_estimator:
                 Rpos = torch.sum(self.ang_weight * self.coro * ReLU(Yk - science_data) ** 2)
                 self.map_neg = Yk - science_data
                 self.map_negR = ReLU(Yk - science_data)
-                Rpos *=  1 #self.nb_frames-1 #**2 #Rpos weight
+                Rpos *=  1 #self.nb_frame-1 #**2 #Rpos weight
             else : Rpos = 0
 
             # Compute loss and local gradients
@@ -748,7 +763,7 @@ class mustard_estimator:
     def decompose(self):
         self.speckles = np.min(self.science_data, 0)
         self.ambiguities = np.min(cube_derotate(
-            np.tile(self.speckles, (self.nb_frames, 1, 1)), self.model.rot_angles), 0)
+            np.tile(self.speckles, (self.nb_frame, 1, 1)), self.model.rot_angles), 0)
         self.stellar_halo = np.min(cube_derotate(np.tile(self.ambiguities, (50, 1, 1)),
                                                  np.linspace(0, 360, 50)), 0)
         self.science_data_ori = self.science_data.copy()
@@ -813,7 +828,7 @@ class mustard_estimator:
         if self.speckles is None:
             res = np.min(self.science_data, 0)
             self.ambiguities = np.min(cube_derotate(
-                np.tile(res, (self.nb_frames, 1, 1)), self.model.rot_angles), 0)
+                np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles), 0)
             self.speckles = res - self.ambiguities
 
         if save:
@@ -832,7 +847,7 @@ class mustard_estimator:
 
         if self.ambiguities is None :
             res = np.min(self.science_data, 0)
-            self.ambiguities = np.min(cube_derotate(np.tile(res, (self.nb_frames, 1, 1)), -self.model.rot_angles), 0)
+            self.ambiguities = np.min(cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
 
             self.stellar_halo = np.min(cube_derotate(np.tile(self.ambiguities, (50, 1, 1)),
                                                  np.linspace(0, 360, 50)), 0)

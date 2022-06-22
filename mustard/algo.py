@@ -22,7 +22,8 @@ from torch.nn.functional import conv2d
 import torch.fft as tf
 
 import numpy as np
-
+from skimage.filters import threshold_multiotsu
+from vip_hci.var import frame_filter_lowpass
 
 # %% Initialisation / kind of PCA / PCA iter
 
@@ -312,7 +313,7 @@ def tensor_fft_shear(arr, arr_ori, c, ax):
     return s_x
 
 
-def tensor_fft_scale(array, scale, ori_dim=True):
+def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
     """
     Resample the frames of a cube with a single scale factor using a FFT-based
     method.
@@ -345,7 +346,7 @@ def tensor_fft_scale(array, scale, ori_dim=True):
         odd = False
 
     dim = array.shape[0]  # even square
-    kd_array = torch.arange(dim/2 + 1, dtype=int)
+    kd_array = torch.arange(dim//2 + 1)
 
     # scaling factor chosen as *close* as possible to N''/N', where:
     #   N' = N + 2*KD (N': dim after FT)
@@ -422,3 +423,24 @@ def tensor_fft_scale(array, scale, ori_dim=True):
 
 def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.abs(tf.ifftshift(tf.ifft2(tf.fftshift(tf.fft2(x)) * tf.fftshift(tf.fft2(y)))))
+
+def convert_to_mask(img: np.ndarray):
+    """ Convert an image into a binary mask
+
+    Parameters
+    ----------
+    img : np.ndarray
+
+    Returns
+    -------
+    mask : np.ndarray
+
+    """
+
+    thresholds = threshold_multiotsu(img)
+    val = thresholds[0]
+    img_m = 1*(img < val)
+    mask = frame_filter_lowpass(img_m)
+
+    return mask
+

@@ -19,15 +19,12 @@ ReLU = reluConstr()
 
 class Cube_model():
 
-    def __init__(self, rot_angles: np.array, coro: np.array, psf: None or np.array):
+    def __init__(self, nb_frame: int, coro: np.array, psf: None or np.array):
 
         # -- Constants
         # Sizes
-        self.nb_rframe = len(rot_angles)
         self.frame_shape = coro.shape
-
-        # Frames known rotations list
-        self.rot_angles = rot_angles
+        self.nb_frame = nb_frame
 
         # Check if deconvolution mode (and pad psf if needed)
         if psf is not None:
@@ -55,7 +52,10 @@ class model_ADI(Cube_model):
      """
 
     def __init__(self, rot_angles: np.array, coro: np.array, psf: None or np.array):
-        super().__init__(rot_angles, coro, psf)
+        self.rot_angles = rot_angles
+        self.nb_rframe = len(rot_angles)
+
+        super().__init__(self.nb_rframe, coro, psf)
 
     def forward(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
@@ -132,9 +132,13 @@ class model_ASDI(Cube_model):
      """
 
     def __init__(self, rot_angles: np.array, scales: np.array, coro: np.array, psf: None or np.array):
-        super().__init__(rot_angles, coro, psf)
+
         self.scales = scales
+        self.rot_angles = rot_angles
+        self.nb_rframe = len(rot_angles)
         self.nb_sframe = len(scales)
+
+        super().__init__(self.nb_rframe, coro, psf)
 
 
     def forward(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
@@ -156,7 +160,46 @@ class model_ASDI(Cube_model):
                 Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[id_r]))
                 Sl = tensor_fft_scale(ReLU(L), float(self.scales[id_s]))
                 if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
-                Y[id_r,id_s] = flux[id_r - 1] * ( fluxR[id_r - 1] * Sl + Rx )
+                Y[id_r, id_s] = flux[id_r - 1] * ( fluxR[id_r - 1] * Sl + Rx )
+
+        return Y
+
+
+class model_SDI(Cube_model):
+    """ Forward models as presented in mayo
+
+            Y = scale_k(L) + X
+
+        with L = starlight/constant flux in the image
+             x = circumstellar flux
+             k, j id of spectral/angular diversity
+     """
+
+    def __init__(self, scales: np.array, coro: np.array, psf: None or np.array):
+
+        self.scales = scales
+        self.nb_sframe = len(scales)
+        super().__init__(self.nb_sframe, coro, psf)
+
+
+
+    def forward(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
+        """ Process forward model  : Y =  ( flux * L + R(x) )  """
+
+        # TODO flux can also vary between spectraly diverse frames ??
+        if flux is None: flux = torch.ones(self.nb_sframe - 1)
+        if fluxR is None: fluxR = torch.ones(self.nb_sframe - 1)
+
+        Y = torch.zeros((self.nb_sframe, ) + L.shape).double()
+
+        # First image. No intensity vector
+        Sl = tensor_fft_scale(ReLU(L), float(self.scales[0]))
+        Y[0] = Sl + ReLU(x)
+
+        for id_s in range(1, self.nb_sframe):
+            Sl = tensor_fft_scale(ReLU(L), float(self.scales[id_s]))
+            if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
+            Y[id_s] = flux[id_s - 1] * ( fluxR[id_s - 1] * Sl + ReLU(x) )
 
         return Y
 
