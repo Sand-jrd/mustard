@@ -159,7 +159,7 @@ class mustard_estimator:
         self.res = None; self.last_iter = None; self.first_iter = None; self.final_estim = None
         self.ambiguities = None; self.speckles = None; self.science_data_ori=None # init results vars
 
-    def set_init(self, X0 = None, L0 = None):
+    def set_init(self, X0 = None, L0 = None, RDI=False):
         """
         Define initialization by yourslef.
 
@@ -177,11 +177,20 @@ class mustard_estimator:
         if L0 is None and X0 is None:
             raise(AssertionError("At least one argument must be provided"))
 
-        if X0 is None :
-            X0 = np.min(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
-        elif L0 is None :
-            L0 = np.min(self.science_data -
-                        cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
+        if RDI :
+            res = np.min(self.science_data, 0)
+            L0 = (L0 + res) // 2
+            R_fr = cube_derotate(self.science_data - L0, self.model.rot_angles)
+            X0 = np.mean(R_fr, axis=0).clip(min=0)
+            #L0 = np.min(self.science_data -
+                    #cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
+
+        else :
+            if X0 is None :
+                X0 = np.min(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
+            elif L0 is None :
+                L0 = np.min(self.science_data -
+                            cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
 
         self.L0x0 = (L0, X0)
 
@@ -1112,6 +1121,20 @@ class mustard_estimator:
             plt.savefig(self.savedir + "/flux_" + self.name)
 
         return flux, fluxR
+
+    def uncertanity_map(self, save=False):
+
+        # cube_no_speakles = self.get_cube_without_speckles()
+        cube_no_speakles = self.get_residual()
+        c_r = cube_derotate(cube_no_speakles, self.model.rot_angles)
+        unc_map = np.var(c_r, axis=0)
+
+        if save:
+            if not isdir(self.savedir): makedirs(self.savedir)
+            write_fits(self.savedir + "/uncertanity", unc_map)
+
+
+        return np.var(c_r, axis=0)
 
     def get_cube_without_speckles(self, way="direct", save=False):
         """Return input cube and angles"""
