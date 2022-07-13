@@ -211,7 +211,7 @@ class Gauss_2D():
 
     def __init__(self, img: np.ndarray):
 
-        res = fit_2dgaussian(img, full_output=True, debug=False)
+        res = fit_2dgaussian(img, full_output=True, debug=False, threshold=True)
 
         self.indices   = torch.from_numpy(np.indices(img.shape))
         self.amplitude = torch.FloatTensor([res['amplitude'][0]])

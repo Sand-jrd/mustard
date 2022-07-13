@@ -516,7 +516,9 @@ class mustard_estimator:
 
         Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
         halo = Gauss_2D(Xk.detach().numpy()[0])
-        Xk = Xk - halo.generate()
+        Xk = ReLU(Xk - ReLU(halo.generate()))
+        self.L0x0 = self.L0x0[0], Xk.detach().numpy()[0]
+
         amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k = halo.get_parameters()
         Lk.requires_grad = True; Xk.requires_grad = True
 
@@ -559,7 +561,6 @@ class mustard_estimator:
             loss0 += (R1_0 + R2_0 + Rpos)
 
         loss, R1, R2 = loss0, R1_0, R2_0
-
         # Starting minization soon ...
         stat_msg = init_msg.format(self.name, save, *self.config, w_r, w_r2, str(maxiter))
         if verbose: print(stat_msg)
@@ -574,7 +575,7 @@ class mustard_estimator:
                         x_stddev_k, y_stddev_k, theta_k
             optimizer.zero_grad()  # Reset gradients
 
-            halo_fit = halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)\
+            halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k))\
                         if estimI == "Halo" else 0
             # Compute model(s)
             Yk = self.model.forward(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[0] else 0
@@ -582,7 +583,7 @@ class mustard_estimator:
 
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk + halo_fit)  if Ractiv * w_r else 0
-            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk + halo_fit, self.mask) if Ractiv * w_r2 else 0
+            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask) if Ractiv * w_r2 else 0
 
             if res_pos :
                 Rx_smooth = self.model.get_Rx(Xk, flux_k)
@@ -611,7 +612,7 @@ class mustard_estimator:
 
                 # Second step : re-compute regul after performing a optimizer step
                 if activ_step == "AJUSTED": optimizer.step(closure)
-                halo_fit = halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k) \
+                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
                     if estimI == "Halo" else 0
 
                 with torch.no_grad():
@@ -619,7 +620,7 @@ class mustard_estimator:
                         reg1 = self.regul(Xk, Lk + halo_fit)
                         w_r  = w_rp[0] * (loss-Rpos) / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                        reg2 = self.regul2(Xk, Lk + halo_fit, self.mask)
+                        reg2 = self.regul2(Xk, Lk, self.mask)
                         w_r2 = w_rp[1] * (loss-Rpos) / reg2 if w_rp[1] and reg2 > 0 else 0
 
                     if (w_rp[0] and reg1 < 0) or (w_rp[1] and reg2 < 0):
@@ -762,26 +763,30 @@ class mustard_estimator:
         # ______________________________________
         # Done, store and unwrap results back to numpy array!
 
+        if estimI == "Halo" :
+            halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)
+            halo_est = ReLU(halo.generate()).detach().numpy()
+        else : halo_est = 0
+
         if k > 1 and (torch.isnan(loss) or loss > loss_evo[-2]) and self.final_estim is not None:
-            L_est = abs(self.final_estim[0].detach().numpy()[0])
+            L_est = abs(self.final_estim[0].detach().numpy()[0]) + halo_est
             X_est = abs((self.coro * self.final_estim[1]).detach().numpy()[0])
         else :
-            L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
+            L_est, X_est = abs(Lk.detach().numpy()[0] + halo_est), abs((self.coro * Xk).detach().numpy()[0])
 
-        halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)
         flux  = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
 
         # Result dict
         res = {'state'   : optimizer.state,
-               'x'       : (L_est, X_est),
-               'ambig'   : (L_est, X_est),
+               'x'       : (L_est + halo_est, X_est),
+               'ambig'   : (L_est + halo_est, X_est),
                'flux'    : flux,
                'fluxR'   : fluxR,
                'loss_evo': loss_evo,
                'Kactiv'  : kactiv,
-               'halo'    : halo.generate().detach().numpy(),
+               'halo'    : halo_est,
                'halo_obj': halo,
                'ending'  : ending}
 
