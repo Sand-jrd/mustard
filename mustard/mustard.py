@@ -327,8 +327,8 @@ class mustard_estimator:
 
         penaliz = penaliz.capitalize()
         rM = self.coro  # corono mask for regul
-        if penaliz not in ("X", "L", "Both", "B") :
-            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
+        if penaliz not in ("X", "L", "Both", "B", "Tb", "Trueboth") :
+            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B','TB'}")
 
         if mode == "dist":
             self.mask = Msk
@@ -352,6 +352,7 @@ class mustard_estimator:
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum(X ** 2)
             elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum(L ** 2)
             elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
+            elif penaliz in ("Trueboth", "TB"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) + tsum(L ** 2))
 
         else: raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
 
