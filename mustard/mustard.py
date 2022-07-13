@@ -32,7 +32,7 @@ from torch.nn import ReLU as relu_constr
 
 # Other
 from mustard.utils import circle, iter_to_gif, print_iter
-from mustard.model import model_ADI, model_ASDI
+from mustard.model import model_ADI, model_ASDI, Gauss_2D
 from copy import deepcopy
 
 # -- For verbose -- #
@@ -515,6 +515,9 @@ class mustard_estimator:
         #  Init variables and optimizer
 
         Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
+        halo = Gauss_2D(Xk.detach().numpy()[0])
+        Xk = Xk - halo.generate()
+        amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k = halo.get_parameters()
         Lk.requires_grad = True; Xk.requires_grad = True
 
         # Model and loss at step 0
@@ -567,16 +570,19 @@ class mustard_estimator:
 
         # Definition of minimizer step.
         def closure():
-            nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k, fluxR_k
+            nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
+                        x_stddev_k, y_stddev_k, theta_k
             optimizer.zero_grad()  # Reset gradients
 
+            halo_fit = halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)\
+                        if estimI == "Halo" else 0
             # Compute model(s)
-            Yk = self.model.forward(Lk, Xk, flux_k, fluxR_k) if w_way[0] else 0
-            Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k, fluxR_k) if w_way[1] else 0
+            Yk = self.model.forward(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[0] else 0
+            Yk_reverse = self.model.forward_ADI_reverse(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[1] else 0
 
             # Compute regularization(s)
-            R1 = Ractiv * w_r * self.regul(Xk, Lk)  if Ractiv * w_r else 0
-            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask) if Ractiv * w_r2 else 0
+            R1 = Ractiv * w_r * self.regul(Xk, Lk + halo_fit)  if Ractiv * w_r else 0
+            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk + halo_fit, self.mask) if Ractiv * w_r2 else 0
 
             if res_pos :
                 Rx_smooth = self.model.get_Rx(Xk, flux_k)
@@ -598,18 +604,22 @@ class mustard_estimator:
 
         # Definition of regularization activation
         def activation():
-            nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k, fluxR_k
+            nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
+                        x_stddev_k, y_stddev_k, theta_k
+
             for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
 
                 # Second step : re-compute regul after performing a optimizer step
                 if activ_step == "AJUSTED": optimizer.step(closure)
+                halo_fit = halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k) \
+                    if estimI == "Halo" else 0
 
                 with torch.no_grad():
                     if w_pcent:
-                        reg1 = self.regul(Xk, Lk)
+                        reg1 = self.regul(Xk, Lk + halo_fit)
                         w_r  = w_rp[0] * (loss-Rpos) / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                        reg2 = self.regul2(Xk, Lk, self.mask)
+                        reg2 = self.regul2(Xk, Lk + halo_fit, self.mask)
                         w_r2 = w_rp[1] * (loss-Rpos) / reg2 if w_rp[1] and reg2 > 0 else 0
 
                     if (w_rp[0] and reg1 < 0) or (w_rp[1] and reg2 < 0):
@@ -632,6 +642,16 @@ class mustard_estimator:
                 elif estimI == "Justl":
                     optimizer = optim.LBFGS([Lk, fluxR_k])
                     Xk.requires_grad = False
+                    fluxR_k.requires_grad = True
+                elif estimI == "Halo":
+                    amplitude_k.requires_grad = True
+                    x_mean_k.requires_grad = True
+                    y_mean_k.requires_grad = True
+                    x_stddev_k.requires_grad = True
+                    y_stddev_k.requires_grad = True
+                    theta_k.requires_grad = True
+                    optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
+                                             x_stddev_k, y_stddev_k, theta_k ])
                     fluxR_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
@@ -668,6 +688,16 @@ class mustard_estimator:
         elif estimI == "Justl":
             optimizer = optim.LBFGS([Lk, fluxR_k])
             Xk.requires_grad = False
+            fluxR_k.requires_grad = True
+        elif estimI == "Halo":
+            amplitude_k.requires_grad = True
+            x_mean_k.requires_grad = True
+            y_mean_k.requires_grad = True
+            x_stddev_k.requires_grad = True
+            y_stddev_k.requires_grad = True
+            theta_k.requires_grad = True
+            optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
+                                     x_stddev_k, y_stddev_k, theta_k])
             fluxR_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
@@ -738,6 +768,7 @@ class mustard_estimator:
         else :
             L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
 
+        halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)
         flux  = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
@@ -750,6 +781,8 @@ class mustard_estimator:
                'fluxR'   : fluxR,
                'loss_evo': loss_evo,
                'Kactiv'  : kactiv,
+               'halo'    : halo.generate().detach().numpy(),
+               'halo_obj': halo,
                'ending'  : ending}
 
         self.res = res
