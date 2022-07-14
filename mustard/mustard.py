@@ -523,7 +523,7 @@ class mustard_estimator:
         #  Init variables and optimizer
 
         Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
-        amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k = halo.get_parameters()
+        amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k = halo.get_parameters()
         Lk.requires_grad = True; Xk.requires_grad = True
 
         # Model and loss at step 0
@@ -576,10 +576,10 @@ class mustard_estimator:
         # Definition of minimizer step.
         def closure():
             nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
-                        x_stddev_k, y_stddev_k, theta_k
+                        x_stddev_k, y_stddev_k, theta_k, bkg_k
             optimizer.zero_grad()  # Reset gradients
 
-            halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k))\
+            halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k))\
                         if estimI == "Halo" else 0
             # Compute model(s)
             Yk = self.model.forward(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[0] else 0
@@ -610,13 +610,13 @@ class mustard_estimator:
         # Definition of regularization activation
         def activation():
             nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
-                        x_stddev_k, y_stddev_k, theta_k
+                        x_stddev_k, y_stddev_k, theta_k, bkg_k
 
             for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
 
                 # Second step : re-compute regul after performing a optimizer step
                 if activ_step == "AJUSTED": optimizer.step(closure)
-                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
+                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)) \
                     if estimI == "Halo" else 0
 
                 with torch.no_grad():
@@ -655,8 +655,9 @@ class mustard_estimator:
                     x_stddev_k.requires_grad = True
                     y_stddev_k.requires_grad = True
                     theta_k.requires_grad = True
+                    bkg_k.requires_grad = True
                     optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
-                                             x_stddev_k, y_stddev_k, theta_k ])
+                                             x_stddev_k, y_stddev_k, theta_k, bkg_k])
                     fluxR_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
@@ -701,15 +702,16 @@ class mustard_estimator:
             x_stddev_k.requires_grad = True
             y_stddev_k.requires_grad = True
             theta_k.requires_grad = True
+            bkg_k.requires_grad = True
             optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
-                                     x_stddev_k, y_stddev_k, theta_k])
+                                     x_stddev_k, y_stddev_k, theta_k, bkg_k])
             fluxR_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
         # Save & prints the first iteration
         loss_evo.append(loss)
-        halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
+        halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)) \
             if estimI == "Halo" else 0
         self.last_iter = (L0 + halo_fit, X0, flux_0, fluxR_k) if estimI else (L0 + halo_fit, X0)
         if verbose: print(head)
@@ -740,8 +742,6 @@ class mustard_estimator:
 
                 # Save & prints
                 loss_evo.append(loss)
-                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
-                    if estimI == "Halo" else 0
                 self.last_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
                 if k == 1 : self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
 
@@ -773,15 +773,15 @@ class mustard_estimator:
         # Done, store and unwrap results back to numpy array!
 
         if estimI == "Halo" :
-            halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)
+            halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)
             halo_est = ReLU(halo.generate()).detach().numpy()
         else : halo_est = 0
 
         if k > 1 and (torch.isnan(loss) or loss > loss_evo[-2]) and self.final_estim is not None:
-            L_est = abs(self.final_estim[0].detach().numpy()[0]) + halo_est
+            L_est = abs(self.final_estim[0].detach().numpy()[0])
             X_est = abs((self.coro * self.final_estim[1]).detach().numpy()[0])
         else :
-            L_est, X_est = abs(Lk.detach().numpy()[0] + halo_est), abs((self.coro * Xk).detach().numpy()[0])
+            L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
 
         flux  = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
@@ -794,7 +794,7 @@ class mustard_estimator:
         # Result dict
         res = {'state'   : optimizer.state,
                'x'       : (L_est , X_est),
-               'ambig'   : (L_est + halo_est, X_est),
+               'x_halo'  : (L_est + halo_est, X_est),
                'flux'    : flux,
                'fluxR'   : fluxR,
                'loss_evo': loss_evo,

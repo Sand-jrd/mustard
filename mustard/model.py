@@ -211,9 +211,12 @@ class Gauss_2D():
 
     def __init__(self, img: np.ndarray):
 
-        res = fit_2dgaussian(img, full_output=True, debug=False, threshold=True)
+        med = np.median(img)
+        res = fit_2dgaussian(img - med, full_output=True, debug=False)
+
 
         self.indices   = torch.from_numpy(np.indices(img.shape))
+        self.bkg       = torch.FloatTensor([med])
         self.amplitude = torch.FloatTensor([res['amplitude'][0]])
         self.x_mean    = torch.FloatTensor([res['centroid_x'][0]])
         self.y_mean    = torch.FloatTensor([res['centroid_y'][0]])
@@ -221,10 +224,18 @@ class Gauss_2D():
         self.y_stddev  = torch.FloatTensor([res['fwhm_y'][0] * gaussian_fwhm_to_sigma])
         self.theta     = np.deg2rad(torch.FloatTensor([res['theta'][0]]))
 
-    def generate_k(self, amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k):
-
+    def generate_k(self, amplitude=None, x_mean=None, y_mean=None, x_stddev=None, y_stddev=None, theta=None
+                   , bkg=None):
 
         x, y = self.indices
+        amplitude_k = amplitude if amplitude is not None else self.amplitude
+        x_mean_k    = x_mean    if x_mean    is not None else self.x_mean
+        y_mean_k    = y_mean    if y_mean    is not None else self.y_mean
+        x_stddev_k  = x_stddev  if x_stddev  is not None else self.x_stddev
+        y_stddev_k  = y_stddev  if y_stddev  is not None else self.y_stddev
+        theta_k     = theta     if theta     is not None else self.theta
+        bkg_k       = bkg       if bkg       is not None else self.bkg
+
 
         cost2 = torch.cos(theta_k) ** 2
         sint2 = torch.sin(theta_k) ** 2
@@ -238,7 +249,7 @@ class Gauss_2D():
         c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
 
         return amplitude_k * torch.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                                    (c * ydiff ** 2)))
+                                    (c * ydiff ** 2))) + bkg_k
 
     def generate(self):
         x, y = self.indices
@@ -255,19 +266,21 @@ class Gauss_2D():
         c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
 
         return self.amplitude * torch.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                                            (c * ydiff ** 2)))
+                                            (c * ydiff ** 2))) + self.bkg
 
-    def set_parameters(self, amplitude_k, x_mean_k, y_mean_k,x_stddev_k, y_stddev_k, theta_k):
+    def set_parameters(self, amplitude=None, x_mean=None, y_mean=None,x_stddev=None, y_stddev=None, theta=None,
+                       bkg=None):
 
-        self.amplitude = amplitude_k
-        self.x_mean = x_mean_k
-        self.y_mean = y_mean_k
-        self.x_stddev = x_stddev_k
-        self.y_stddev = y_stddev_k
-        self.theta = theta_k
+        if amplitude is not None : self.amplitude = amplitude
+        if x_mean    is not None : self.x_mean = x_mean
+        if y_mean    is not None : self.y_mean = y_mean
+        if x_stddev  is not None : self.x_stddev = x_stddev
+        if y_stddev  is not None : self.y_stddev = y_stddev
+        if theta     is not None : self.theta = theta
+        if bkg       is not None : self.bkg = bkg
 
     def get_parameters(self) :
-        return self.amplitude, self.x_mean, self.y_mean, self.x_stddev, self.y_stddev, self.theta
+        return self.amplitude, self.x_mean, self.y_mean, self.x_stddev, self.y_stddev, self.theta, self.bkg
 
 def pad_psf(M: np.array, shape) -> np.array:
     """Pad with 0 the PSF if it is too small """
