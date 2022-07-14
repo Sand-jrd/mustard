@@ -491,7 +491,13 @@ class mustard_estimator:
 
         if self.L0x0 is not None:
             warnings.warn(DeprecationWarning("Use of initalization other than max-common is not recommended."))
-
+        if estimI == "Halo" :
+            res1 = np.min(science_data_derot_np, 0)
+            L_fr = self.science_data - cube_derotate(np.tile(res1, (self.nb_frame, 1, 1)), self.model.rot_angles)
+            res = np.min(self.science_data, 0)
+            R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
+            self.L0x0 =  np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+            halo = Gauss_2D(np.min(np.array([res1, res]), axis=0))
         elif init_maxL :
             res = np.min(self.science_data, 0)
             R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
@@ -500,6 +506,7 @@ class mustard_estimator:
             res  = np.min(science_data_derot_np, 0)
             L_fr = self.science_data - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles)
             self.L0x0 = np.mean(L_fr, axis=0), res
+
 
         L0, X0 = self.L0x0[0], self.L0x0[1]
         if self.config[0] == "peak_preservation" : self.xmax = np.max(X0)
@@ -516,10 +523,6 @@ class mustard_estimator:
         #  Init variables and optimizer
 
         Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
-        halo = Gauss_2D(Xk.detach().numpy()[0])
-        Xk = ReLU(Xk - ReLU(halo.generate()))
-        self.L0x0 = self.L0x0[0], Xk.detach().numpy()[0]
-
         amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k = halo.get_parameters()
         Lk.requires_grad = True; Xk.requires_grad = True
 
@@ -706,7 +709,9 @@ class mustard_estimator:
 
         # Save & prints the first iteration
         loss_evo.append(loss)
-        self.last_iter = (L0, X0, flux_0, fluxR_k) if estimI else (L0, X0)
+        halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
+            if estimI == "Halo" else 0
+        self.last_iter = (L0 + halo_fit, X0, flux_0, fluxR_k) if estimI else (L0 + halo_fit, X0)
         if verbose: print(head)
         txt_msg += "\n" + head
         process_to_prints()
@@ -730,10 +735,13 @@ class mustard_estimator:
 
                 # -- MINIMIZER STEP -- #
                 optimizer.step(closure)
-                if k > 1 and (torch.isnan(loss) or loss > loss_evo[-1]): self.final_estim = deepcopy(self.last_iter)
+                if k > 1 and (torch.isnan(loss) or loss < loss_evo[-1]): self.final_estim = deepcopy(self.last_iter)
+                else : self.final_estim = self.last_iter
 
                 # Save & prints
                 loss_evo.append(loss)
+                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
+                    if estimI == "Halo" else 0
                 self.last_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
                 if k == 1 : self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
 
@@ -779,9 +787,13 @@ class mustard_estimator:
         fluxR = abs(fluxR_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
 
+        self.last_iter = (self.final_estim[0].detach() + ReLU(halo.generate().detach()),
+                         (self.coro * self.final_estim[1]).detach(), flux_k.detach(), fluxR_k.detach()) \
+                        if estimI else (self.final_estim[0].detach() + ReLU(halo.generate().detach()),
+                                        (self.coro * self.final_estim[1]).detach())
         # Result dict
         res = {'state'   : optimizer.state,
-               'x'       : (L_est + halo_est, X_est),
+               'x'       : (L_est , X_est),
                'ambig'   : (L_est + halo_est, X_est),
                'flux'    : flux,
                'fluxR'   : fluxR,
@@ -944,6 +956,7 @@ class mustard_estimator:
         L, X = self.res["x"]
         cube = self.science_data
         ang  = self.model.rot_angles
+        halo = self.res["halo"]
 
         noise = self.get_residual()
         flx, flxR = self.get_flux(show=False)
@@ -963,35 +976,40 @@ class mustard_estimator:
         def plot_framek(val: int, show=True) -> None:
 
             num = int(val)
-            font["size"] = 26
+            font["size"] = 24
             font["color"] = "white"
 
-            plt.subplot(1, 2, 1)
+            plt.subplot(2, 2, 1)
             plt.imshow(cube[num], vmax=vmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "ADI cube", font)
+            plt.text(5, 5, "ADI cube", font)
             plt.title("Frame n°" + str(num))
             font["size"] = 22
-            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flx[num]), font)
+            plt.text(5, 15, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flx[num]), font)
 
-            font["size"] = 22
-            plt.subplot(2, 2, 4)
+            plt.subplot(2, 2, 3)
             plt.imshow(flx[num] * frame_rotate(X, ang[num]), vmax=Rvmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "Rotate", font)
+            plt.text(5, 5, "Rotate", font)
+
+            font["size"] = 16
+            plt.subplot(2, 4, 3)
+            plt.imshow(flxR[num] * flx[num]* L, vmax=vmax, vmin=vmin, cmap='jet')
+            plt.text(5, 5, "Static", font)
+            font["size"] = 12
+            plt.text(5, 15, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
 
             font["size"] = 16
             plt.subplot(2, 4, 4)
-            plt.imshow(flxR[num] * flx[num]* L, vmax=vmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "Static", font)
+            plt.imshow(flxR[num] * flx[num] * halo, vmax=vmax, vmin=vmin, cmap='jet')
+            plt.text(5, 5, "Halo", font)
             font["size"] = 12
-            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
+            plt.text(5, 15, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
 
-            font["size"] = 16
+            font["size"] = 22
             font["color"] = "red"
-
-            plt.subplot(2, 4, 3)
+            plt.subplot(2, 2, 4)
             plt.imshow(noise[num], cmap='jet')
             plt.clim(-np.percentile(noise[num], 98), +np.percentile(noise[num], 98))
-            plt.text(20, 40, "Random", font)
+            plt.text(5, 5, "Random", font)
             if show : plt.show()
 
         # ax_slid = plt.axes([0.1, 0.25, 0.0225, 0.63])
