@@ -459,7 +459,7 @@ class mustard_estimator:
         # Regularization activation init setting
         if kactiv == "converg" : kactiv = maxiter  # If option converge, kactiv start when miniz end
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
-        w_rp = w_r, w_r2 if w_pcent else  0, 0 # If values are in percent save them; It will be computed later
+        w_rp = np.array([w_r, w_r2]) if w_pcent else  np.array([0, 0]) # If values are in percent save them; It will be computed later
         w_r = w_r if w_r else 0; w_r2 = w_r2 if w_r2 else 0 # If None/0/False, it will be set to 0
 
         # Compute weights for small angles bias
@@ -732,16 +732,19 @@ class mustard_estimator:
         try :
             for k in range(1, maxiter+1):
 
-                # Activation
-                if kactiv and k == kactiv:
-                    Ractiv = 1; mink = k + 2
+                # Ajustement
+                r1np = R1.numpy();
+                r1np = R2.numpy()
+                lossnp = (loss - Rpos - R1 - R2).numpy()
+                w_rp_k = np.array([r1np / w_r / lossnp, r1np / w_r2 / lossnp])
+                if Ractiv and np.any([3 * w_rp <= w_rp_k, 0.05 * w_rp >= w_rp_k]):
+                    if verbose: print("Hyperparameters will be re-computed")
                     activation()
                     continue
 
-                # Ajustement
-                w_rp_k = (R1 / w_r) / (loss - Rpos - R1 - R2) , (R2 / w_r2) / (loss - Rpos - R1 - R2)
-                if Ractiv and np.any([3*w_rp < w_rp_k, 0.05*w_rp < w_rp_k]):
-                    if verbose : print("Hyperparameters will be re-computed")
+                # Activation
+                if kactiv and k == kactiv:
+                    Ractiv = 1; mink = k + 2
                     activation()
                     continue
 
