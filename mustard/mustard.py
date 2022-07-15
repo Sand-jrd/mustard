@@ -275,7 +275,7 @@ class mustard_estimator:
         if smoothL : self.regul = lambda X, L: self.smooth(X) + self.p_L*self.smooth(L)
         else       : self.regul = lambda X, L: self.smooth(X)
 
-    def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False, save=True):
+    def configR2(self, Msk=None, mode = "mask", penaliz = "X", invert=False, p_w=2, save=True):
         """ Configuration for Second regularization.
         Two possible mode :   R = M*X      (mode 'mask')
                            or R = dist(M-X) (mode 'dist')
@@ -352,7 +352,7 @@ class mustard_estimator:
             if   penaliz == "X"   : self.regul2 = lambda X, L, M: tsum(X ** 2)
             elif penaliz == "L"   : self.regul2 = lambda X, L, M: tsum(L ** 2)
             elif penaliz in ("Both", "B"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
-            elif penaliz in ("Trueboth", "TB"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) + tsum(L ** 2))
+            elif penaliz in ("Trueboth", "TB"): self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) + p_w*tsum(L ** 2))
 
         else: raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
 
@@ -485,7 +485,12 @@ class mustard_estimator:
         # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
         # med = np.median(abs(self.science_data))
         # med = 0
+        self.sc_derot = science_data_derot_np
+        temporal_var = np.var(science_data_derot_np, axis=0)
+        temporal_var *= 1 / np.median(temporal_var)
+        self.var_pond = torch.unsqueeze(torch.from_numpy(1/temporal_var), 1).double()
 
+        self.weight = self.var_pond * self.ang_weight
         # __________________________________
         # Initialisation with max common
 
@@ -496,8 +501,9 @@ class mustard_estimator:
             L_fr = self.science_data - cube_derotate(np.tile(res1, (self.nb_frame, 1, 1)), self.model.rot_angles)
             res = np.min(self.science_data, 0)
             R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
-            self.L0x0 =  np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
             halo = Gauss_2D(np.min(np.array([res1, res]), axis=0))
+            self.L0x0 =  np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+            self.halo0 = deepcopy(halo.generate())
         elif init_maxL :
             res = np.min(self.science_data, 0)
             R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
@@ -550,7 +556,7 @@ class mustard_estimator:
             else : Rpos = 0
 
             if w_pcent and Ractiv : # Auto hyperparameters
-                reg1 = self.regul(X0, L0)
+                reg1 = self.regul(X0, L0 + self.halo0)
                 w_r  = w_rp[0] * loss0 / reg1  if w_rp[0] and reg1 > 0 else 0
 
                 reg2 = self.regul2(X0, L0, self.mask)
@@ -560,7 +566,7 @@ class mustard_estimator:
                     if verbose : print("Impossible to compute regularization weight. Activation is set to iteration n°2. ")
                     kactiv = 2
 
-            R1_0 = Ractiv * w_r * self.regul(X0, L0) if w_r else 0
+            R1_0 = Ractiv * w_r * self.regul(X0, L0 + self.halo0) if w_r else 0
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask) if w_r2 else 0
             loss0 += (R1_0 + R2_0 + Rpos)
 
@@ -732,17 +738,25 @@ class mustard_estimator:
                     activation()
                     continue
 
+                # Ajustement
+                w_rp_k = (R1 / w_r) / (loss - Rpos - R1 - R2) , (R2 / w_r2) / (loss - Rpos - R1 - R2)
+                if Ractiv and np.any([3*w_rp < w_rp_k, 0.05*w_rp < w_rp_k]):
+                    if verbose : print("Hyperparameters will be re-computed")
+                    activation()
+                    continue
+
                 # Descactivation
                 if kdactiv and k == kdactiv: Ractiv = 0
 
                 # -- MINIMIZER STEP -- #
                 optimizer.step(closure)
-                if k > 1 and (torch.isnan(loss) or loss < loss_evo[-1]): self.final_estim = deepcopy(self.last_iter)
-                else : self.final_estim = self.last_iter
+                if k > 1 and (torch.isnan(loss) or (kactiv and k > kactiv and loss > loss_evo[-1])):
+                    self.final_estim = self.last_iter
 
                 # Save & prints
                 loss_evo.append(loss)
-                self.last_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
+                self.last_iter = (deepcopy(Lk), deepcopy(Xk), deepcopy(flux_k), deepcopy(fluxR_k)) if estimI \
+                                else (deepcopy(Lk), deepcopy(Xk))
                 if k == 1 : self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
 
                 # Break point (based on gtol)
@@ -777,11 +791,12 @@ class mustard_estimator:
             halo_est = ReLU(halo.generate()).detach().numpy()
         else : halo_est = 0
 
-        if k > 1 and (torch.isnan(loss) or loss > loss_evo[-2]) and self.final_estim is not None:
+        if k > 1 and (torch.isnan(loss) or (kactiv and k > kactiv and loss > loss_evo[-1])) and self.final_estim is not None:
             L_est = abs(self.final_estim[0].detach().numpy()[0])
             X_est = abs((self.coro * self.final_estim[1]).detach().numpy()[0])
         else :
             L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
+            self.final_estim = self.last_iter
 
         flux  = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
@@ -841,11 +856,12 @@ class mustard_estimator:
             reconstructed_cube = self.model.forward(*self.last_iter)  # Reconstruction on last iteration
             residual_cube = science_data - reconstructed_cube
 
-        elif way == "reverse":
+        elif way == "reverse" :
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
             science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
             reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
             residual_cube = science_data - reconstructed_cube
+
 
         else : raise(ValueError,"way sould be 'reverse' or 'direct'")
 
@@ -1252,6 +1268,7 @@ class mustard_estimator:
 
             write_fits(self.savedir+"/L0X0/" + "/L0.fits", L0, verbose=False)
             write_fits(self.savedir+"/L0X0/" + "/X0.fits", X0, verbose=False)
+            write_fits(self.savedir+"/L0X0/" + "/halo0.fits", self.halo0.detach().numpy(), verbose=False)
             write_fits(self.savedir+"/L0X0/" + "/nice_X0.fits", self.coro.numpy() * nice_X0, verbose=False)
 
         return L0, X0
