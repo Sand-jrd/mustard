@@ -497,11 +497,13 @@ class mustard_estimator:
         if self.L0x0 is not None:
             warnings.warn(DeprecationWarning("Use of initalization other than max-common is not recommended."))
         if estimI == "Halo" :
+            med = np.median(self.science_data)
             res1 = np.min(science_data_derot_np, 0)
             L_fr = self.science_data - cube_derotate(np.tile(res1, (self.nb_frame, 1, 1)), self.model.rot_angles)
             res = np.min(self.science_data, 0)
             R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
-            halo = Gauss_2D(np.min(np.array([res1, res]), axis=0))
+            halo = Gauss_2D(np.median(self.science_data, axis=0))
+            halo.set_parameters(bkg=torch.FloatTensor([med]))
             self.L0x0 =  np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
             self.halo0 = deepcopy(halo.generate())
         elif init_maxL :
@@ -733,14 +735,16 @@ class mustard_estimator:
             for k in range(1, maxiter+1):
 
                 # Ajustement
-                r1np = R1.numpy();
-                r1np = R2.numpy()
-                lossnp = (loss - Rpos - R1 - R2).numpy()
-                w_rp_k = np.array([r1np / w_r / lossnp, r1np / w_r2 / lossnp])
-                if Ractiv and np.any([3 * w_rp <= w_rp_k, 0.05 * w_rp >= w_rp_k]):
-                    if verbose: print("Hyperparameters will be re-computed")
-                    activation()
-                    continue
+                if k > mink and (Ractiv * w_r or Ractiv * w_r2):
+                    r1np = R1.detach().numpy() / w_r  if w_r else 0
+                    r1np = R2.detach().numpy() / w_r2 if w_r2 else 0
+                    lossnp = (loss - Rpos - R1 - R2).detach().numpy()
+                    w_rp_k = np.array([r1np / lossnp, r1np / lossnp])
+                    if np.any([3 * w_rp < w_rp_k]):
+                        if verbose: print("Hyperparameters will be re-computed")
+                        activation()
+                        mink = k + 2
+                        continue
 
                 # Activation
                 if kactiv and k == kactiv:
@@ -897,6 +901,7 @@ class mustard_estimator:
         plt.xticks(range(len(loss_evo)-Kactiv), range(Kactiv, len(loss_evo)) )
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/convergence_" + self.name)
 
@@ -911,6 +916,7 @@ class mustard_estimator:
             self.speckles = res - self.ambiguities
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/speckles" + self.name, self.speckles)
             write_fits(self.savedir + "/speckles_and_stellar_halo" + self.name, self.speckles+self.ambiguities)
@@ -932,6 +938,7 @@ class mustard_estimator:
                                                  np.linspace(0, 360, 50)), 0)
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/ambiguities_halo" + self.name, self.ambiguities)
             write_fits(self.savedir + "/stellar_halo" + self.name, self.stellar_halo)
@@ -963,6 +970,7 @@ class mustard_estimator:
         if show: plt.show()
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/PA_frame_weight_" + self.name)
 
@@ -1193,6 +1201,7 @@ class mustard_estimator:
         if show: plt.show()
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             plt.savefig(self.savedir + "/flux_" + self.name)
 
@@ -1206,6 +1215,7 @@ class mustard_estimator:
         unc_map = np.var(c_r, axis=0)
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/uncertanity", unc_map)
 
@@ -1229,6 +1239,7 @@ class mustard_estimator:
 
         reconstructed_cube = reconstructed_cube.detach().numpy()[:, 0, :, :]
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/cube_without_speckles_" + way + "_" + self.name, reconstructed_cube)
 
@@ -1251,6 +1262,7 @@ class mustard_estimator:
 
         reconstructed_cube = self.coro.numpy() * reconstructed_cube.detach().numpy()[:, 0, :, :]
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/reconstruction_" + way + "_" + self.name, reconstructed_cube)
 
@@ -1263,6 +1275,7 @@ class mustard_estimator:
         L0, X0 = self.L0x0
 
         if save:
+            if isinstance(save,str) : self.savedir=save
             if not isdir(self.savedir): makedirs(self.savedir)
             if not isdir(self.savedir+"/L0X0/"): makedirs(self.savedir+"/L0X0/")
             print("Save init from in " + self.savedir+"/L0X0" + "...")
