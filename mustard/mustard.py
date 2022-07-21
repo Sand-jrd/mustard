@@ -20,7 +20,8 @@ from os import makedirs, remove, rmdir
 from os.path import isdir
 
 # Algo and science model
-from mustard.algo import init_estimate, sobel_tensor_conv, convert_to_mask
+from mustard.algo import sobel_tensor_conv, convert_to_mask
+
 import torch
 import numpy as np
 
@@ -55,6 +56,11 @@ init_msg = sep + "\nResolving IP-ADI optimization problem - name : {}" +\
 activ_msg = "REGUL HAVE BEEN {} with w_r={:.2f} and w_r2={:.2f}"
 
 ReLU = relu_constr()
+
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return array[idx]
 
 def loss_ratio(Ractiv: int or bool, R1: float, R2: float, Rp: float, L: float) -> tuple:
     """ Compute Regul weight over data attachment terme """
@@ -104,6 +110,7 @@ class mustard_estimator:
             Path for outputs
         """
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # -- Create model and define constants --
 
         if Badframes is not None:
@@ -135,8 +142,11 @@ class mustard_estimator:
         self.coro   = (1 - circle(self.shape, coro)) * pupil
         self.coroR  = (1 - circle(self.shape, coro)) * pupilR
 
-        # Convert to tensor
+        # Shift the angle list around 0 (let's not include more uncertanity than necessary. Here at least one angle is 0)
         rot_angles = normlizangle(angles)
+        self.ang_shift = find_nearest(rot_angles, np.median(rot_angles))
+        rot_angles -= self.ang_shift
+
         self.science_data = science_data
         self.model = model_ASDI(rot_angles, scale, self.coro, psf) if scale \
             else model_ADI(rot_angles, self.coro, psf)
@@ -145,11 +155,11 @@ class mustard_estimator:
             raise("Length of angles/scales does not match the size of the science-data cube !")
 
         # Will be filled with weight if anf_weight option is activated
-        self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double()
+        self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double().to(self.device)
 
 
-        self.coro  = torch.from_numpy(self.coro).double()
-        self.coroR = torch.from_numpy(self.coroR).double()
+        self.coro  = torch.from_numpy(self.coro).double().to(self.device)
+        self.coroR = torch.from_numpy(self.coroR).double().to(self.device)
 
         # -- Configure regularization (can be change later, this is defaults parameters)
         self.config = ["smooth", None, 'No' if psf is None else 'With','no', 'Both L and X']
@@ -178,7 +188,7 @@ class mustard_estimator:
             raise(AssertionError("At least one argument must be provided"))
 
         if RDI :
-            res = np.min(self.science_data, 0)
+            res = torch.min(self.science_data, 0)
             L0 = (L0 + res) // 2
             R_fr = cube_derotate(self.science_data - L0, self.model.rot_angles)
             X0 = np.mean(R_fr, axis=0).clip(min=0)
@@ -194,64 +204,6 @@ class mustard_estimator:
 
         self.L0x0 = (L0, X0)
 
-    def initialisation(self, from_dir=None, save=None, Imode="max_common",  **kwargs):
-        """ Init L0 (starlight) and X0 (circonstellar) with a PCA
-         
-         Parameters
-         ----------
-          from_dir : str (optional)
-             if None, compute PCA
-             if a path is given, get L0 (starlight) and X0 (circonstellar) from the directory
-
-          save : bool
-             if a True, L0 (starlight) and X0 (circonstellar) will be saved at self.savedir
-
-          Imode : str
-            Type of initialisation : {'pcait','pca'}
-
-          kwargs :
-             Argument that will be pass to :
-             vip_hci.pca.pca_fullfr.pca if 'Imode' = 'pca'
-             vip_hci.itpca.pca_it if 'Imode' = 'pcait'
-
-         Returns
-         -------
-         L_est, X_est: ndarray
-             Estimated starlight (L) 
-             and circunstlellar contributions (X) 
-         
-        """
-        warnings.warn(DeprecationWarning("this will be removed in the future !!!!"))
-        if from_dir:
-            print("Get init from pre-processed datas...")
-            L0 = open_fits(from_dir + "/L0.fits", verbose=False)
-            X0 = open_fits(from_dir + "/X0.fits", verbose=False)
-
-        else:
-
-            # -- Iterative PCA for variable init -- #
-            start_time = datetime.now()
-            print(sep + "\nInitialisation  ...")
-
-            L0, X0 = init_estimate(self.science_data, self.model.rot_angles, Imode=Imode , **kwargs)
-
-            print("Done - running time : " + str(datetime.now() - start_time) + "\n" + sep)
-
-            if save:
-                if not isdir(self.savedir + "/L0X0/"): makedirs(self.savedir + "/L0X0/")
-                print("Save init from in " + self.savedir + "/L0X0/" + "...")
-
-                nice_X0 = self.coro.numpy() * X0
-                nice_X0 = (nice_X0 - np.median(nice_X0)).clip(0)
-
-                write_fits(self.savedir + "/L0X0/" + "/L0.fits", L0, verbose=False)
-                write_fits(self.savedir + "/L0X0/" + "/X0.fits", X0, verbose=False)
-                write_fits(self.savedir + "/L0X0/" + "/nice_X0.fits", self.coro.numpy()*nice_X0, verbose=False)
-
-        # -- Define constantes
-        self.L0x0 = (L0, X0)
-
-        return L0, X0
 
     def configR1(self, mode: str, smoothL = True, p_L = 1, epsi = 1e-7):
         """ Configuration of first regularization. (smooth-like)"""
@@ -370,7 +322,7 @@ class mustard_estimator:
         """ Resole the minimization of probleme neo-mayo
             The first step with pca aim to find a good initialisation
             The second step process to the minimization
-         
+
         Parameters
         ----------
 
@@ -442,7 +394,7 @@ class mustard_estimator:
          -------
          L_est, X_est: ndarray
              Estimated starlight (L) and circunstlellar (X) contributions
-         
+
         """
         # For verbose, saving, configuration info sortage
         estimI = estimI.capitalize()
@@ -459,14 +411,14 @@ class mustard_estimator:
         # Regularization activation init setting
         if kactiv == "converg" : kactiv = maxiter  # If option converge, kactiv start when miniz end
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
-        w_rp = np.array([w_r, w_r2]) if w_pcent else  np.array([0, 0]) # If values are in percent save them; It will be computed later
         w_r = w_r if w_r else 0; w_r2 = w_r2 if w_r2 else 0 # If None/0/False, it will be set to 0
+        w_rp = np.array([w_r, w_r2]) if w_pcent else  np.array([0, 0]) # If values are in percent save them; It will be computed later
 
         # Compute weights for small angles bias
         if weighted_rot :
             self.config[3] = "with"
             ang_weight = compute_rot_weight(self.model.rot_angles)
-            self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frame, 1, 1, 1))).double()
+            self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frame, 1, 1, 1))).double().to(self.device)
 
         # ______________________________________
         # Define constantes and convert arry to tensor
@@ -479,41 +431,43 @@ class mustard_estimator:
 
         if min_sub: self.decompose()
 
-        science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
-        science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+        science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
+        science_data_derot_np = abs(cube_derotate(self.science_data, self.model.rot_angles, border_mode='wrap'))
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
         # med = np.median(abs(self.science_data))
         # med = 0
-        self.sc_derot = science_data_derot_np
-        temporal_var = np.var(science_data_derot_np, axis=0)
-        temporal_var *= 1 / np.median(temporal_var)
-        self.var_pond = torch.unsqueeze(torch.from_numpy(1/temporal_var), 1).double()
 
-        self.weight = self.var_pond * self.ang_weight
+        # This is a bad idea...
+        temporal_var = np.var(self.science_data, axis=0)
+        temporal_var *= 1 / np.max(temporal_var)
+        self.var_pond = torch.unsqueeze(torch.from_numpy(1 / temporal_var), 0).double().to(self.device)
+
+        self.weight = self.ang_weight * self.coro * torch.ones(science_data.shape).double().to(self.device)
+
         # __________________________________
         # Initialisation with max common
-
+        self.halo0 = 0
         if self.L0x0 is not None:
             warnings.warn(DeprecationWarning("Use of initalization other than max-common is not recommended."))
         if estimI == "Halo" :
-            med = np.median(self.science_data)
-            res1 = np.min(science_data_derot_np, 0)
+            res1 = abs(np.median(science_data_derot_np, 0))
             L_fr = self.science_data - cube_derotate(np.tile(res1, (self.nb_frame, 1, 1)), self.model.rot_angles)
-            res = np.min(self.science_data, 0)
+            res = np.min(self.science_data, 0).clip(min=0)
             R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
-            halo = Gauss_2D(np.median(self.science_data, axis=0))
-            halo.set_parameters(bkg=torch.FloatTensor([med]))
-            self.L0x0 =  np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+            self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+            halo = Gauss_2D(np.mean(np.array([res1, res]), axis=0))
             self.halo0 = deepcopy(halo.generate())
         elif init_maxL :
-            res = np.min(self.science_data, 0)
-            R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
+            res = np.median(science_data, axis=0)
+            R_fr = science_data_derot_np - \
+                   abs(cube_derotate(torch.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles))
             self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
         else :
-            res  = np.min(science_data_derot_np, 0)
-            L_fr = self.science_data - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles)
-            self.L0x0 = np.mean(L_fr, axis=0), res
+            res  = np.min(abs(science_data_derot_np), 0)
+            L_fr = self.science_data - \
+                abs(cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles, border_mode='wrap'))
+            self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), res.clip(min=0)
 
 
         L0, X0 = self.L0x0[0], self.L0x0[1]
@@ -522,37 +476,37 @@ class mustard_estimator:
         # __________________________________
         # Initialisation with max common
 
-        L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double()
-        X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double()
-        flux_0 = torch.ones(self.model.nb_frame - 1)
-        fluxR_0 = torch.ones(self.model.nb_frame - 1)
+        L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double().to(self.device)
+        X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double().to(self.device)
+        flux_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
+        fluxR_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
 
         # ______________________________________
         #  Init variables and optimizer
 
         Lk, Xk, flux_k, fluxR_k,  k = L0.clone(), X0.clone(), flux_0.clone(), fluxR_0.clone(), 0
-        amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k = halo.get_parameters()
+        amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k = halo.get_parameters()
         Lk.requires_grad = True; Xk.requires_grad = True
 
         # Model and loss at step 0
         with torch.no_grad():
 
-            Y0 = self.model.forward(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
-            Y0_reverse = self.model.forward_ADI_reverse(L0, X0, flux_0, fluxR_0) if w_way[1] else 0
+            Y0 = self.model.forward(L0, X0 + self.halo0, flux_0, fluxR_0) if w_way[0] else 0
+            Y0_reverse = self.model.forward_ADI_reverse(L0 + self.halo0, X0, flux_0, fluxR_0) if w_way[1] else 0
 
-            loss0 = w_way[0] * torch.sum(self.ang_weight * self.coro * (Y0 - science_data) ** 2) + \
-                    w_way[1] * torch.sum(self.ang_weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
+            loss0 = w_way[0] * torch.sum(self.weight * self.coro * (Y0 - science_data) ** 2) + \
+                    w_way[1] * torch.sum(self.weight * self.coro * (Y0_reverse - science_data_derot) ** 2)
 
             if res_pos :
                 Rx_smooth = self.model.get_Rx(X0, flux_0)
                 Lf = self.model.get_Lf(L0, flux_0, fluxR_0)
                 nospeck = ReLU(science_data - Lf)
-                Rpos = torch.sum(self.ang_weight * self.coro * ReLU(Y0 - science_data) ** 2)
+                Rpos = torch.sum(self.weight * self.coro * ReLU(Y0 - science_data) ** 2)
                 self.map_negR0 = ReLU(Y0 - science_data)
                 self.map_neg0 = Y0 - science_data
 
                 # if w_way[0] and res_pos else 0
-                # Rpos += torch.sum(self.ang_weight * self.coro * ReLU(Y0_reverse - science_data_derot-med) ** 2) \
+                # Rpos += torch.sum(self.weight * self.coro * ReLU(Y0_reverse - science_data_derot-med) ** 2) \
                     # if w_way[1] and res_pos else 0
                 Rpos *= 1#self.nb_frame-1 #self.nb_frame-1 #**2 # Rpos weight
             else : Rpos = 0
@@ -584,13 +538,13 @@ class mustard_estimator:
         # Definition of minimizer step.
         def closure():
             nonlocal R1, R2, Rpos, loss, w_r, w_r2, Lk, Xk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
-                        x_stddev_k, y_stddev_k, theta_k, bkg_k
+                        x_stddev_k, y_stddev_k, theta_k
             optimizer.zero_grad()  # Reset gradients
 
-            halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k))\
+            halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k))\
                         if estimI == "Halo" else 0
             # Compute model(s)
-            Yk = self.model.forward(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[0] else 0
+            Yk = self.model.forward(Lk, Xk + halo_fit, flux_k, fluxR_k) if w_way[0] else 0
             Yk_reverse = self.model.forward_ADI_reverse(Lk + halo_fit, Xk, flux_k, fluxR_k) if w_way[1] else 0
 
             # Compute regularization(s)
@@ -601,15 +555,15 @@ class mustard_estimator:
                 Rx_smooth = self.model.get_Rx(Xk, flux_k)
                 Lf = self.model.get_Lf(Lk, flux_k, fluxR_k)
                 nospeck = ReLU(science_data - Rx_smooth)
-                Rpos = torch.sum(self.ang_weight * self.coro * ReLU(Yk - science_data) ** 2)
+                Rpos = torch.sum(self.weight * self.coro * ReLU(Yk - science_data) ** 2)
                 self.map_neg = Yk - science_data
                 self.map_negR = ReLU(Yk - science_data)
                 Rpos *=  1 #self.nb_frame-1 #**2 #Rpos weight
             else : Rpos = 0
 
             # Compute loss and local gradients
-            loss = w_way[0] * torch.sum( self.ang_weight * self.coro * (Yk - science_data) ** 2) + \
-                   w_way[1] * torch.sum( self.ang_weight * self.coro * (Yk_reverse - science_data_derot) ** 2) + \
+            loss = w_way[0] * torch.sum( self.weight * self.coro * (Yk - science_data) ** 2) + \
+                   w_way[1] * torch.sum( self.weight * self.coro * (Yk_reverse - science_data_derot) ** 2) + \
                    (R1 + R2 + Rpos)
 
             loss.backward()
@@ -618,13 +572,13 @@ class mustard_estimator:
         # Definition of regularization activation
         def activation():
             nonlocal w_r, w_r2, optimizer, Xk, Lk, flux_k, fluxR_k, amplitude_k, x_mean_k, y_mean_k,\
-                        x_stddev_k, y_stddev_k, theta_k, bkg_k
+                        x_stddev_k, y_stddev_k, theta_k
 
             for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
 
                 # Second step : re-compute regul after performing a optimizer step
                 if activ_step == "AJUSTED": optimizer.step(closure)
-                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)) \
+                halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
                     if estimI == "Halo" else 0
 
                 with torch.no_grad():
@@ -663,9 +617,8 @@ class mustard_estimator:
                     x_stddev_k.requires_grad = True
                     y_stddev_k.requires_grad = True
                     theta_k.requires_grad = True
-                    bkg_k.requires_grad = True
                     optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
-                                             x_stddev_k, y_stddev_k, theta_k, bkg_k])
+                                             x_stddev_k, y_stddev_k, theta_k])
                     fluxR_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
@@ -710,16 +663,15 @@ class mustard_estimator:
             x_stddev_k.requires_grad = True
             y_stddev_k.requires_grad = True
             theta_k.requires_grad = True
-            bkg_k.requires_grad = True
             optimizer = optim.LBFGS([Lk, Xk, fluxR_k, amplitude_k, x_mean_k, y_mean_k,
-                                     x_stddev_k, y_stddev_k, theta_k, bkg_k])
+                                     x_stddev_k, y_stddev_k, theta_k])
             fluxR_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
         # Save & prints the first iteration
         loss_evo.append(loss)
-        halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)) \
+        halo_fit = ReLU(halo.generate_k(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)) \
             if estimI == "Halo" else 0
         self.last_iter = (L0 + halo_fit, X0, flux_0, fluxR_k) if estimI else (L0 + halo_fit, X0)
         if verbose: print(head)
@@ -734,17 +686,19 @@ class mustard_estimator:
         try :
             for k in range(1, maxiter+1):
 
-                # Ajustement
-                if k > mink and (Ractiv * w_r or Ractiv * w_r2):
-                    r1np = R1.detach().numpy() / w_r  if w_r else 0
-                    r1np = R2.detach().numpy() / w_r2 if w_r2 else 0
-                    lossnp = (loss - Rpos - R1 - R2).detach().numpy()
-                    w_rp_k = np.array([r1np / lossnp, r1np / lossnp])
-                    if np.any([3 * w_rp < w_rp_k]):
-                        if verbose: print("Hyperparameters will be re-computed")
-                        activation()
-                        mink = k + 2
-                        continue
+                # Ajustement - This is also a very bad idea...
+                enable_adj = False
+                if enable_adj :
+                    if k > mink and (Ractiv * w_r or Ractiv * w_r2):
+                        r1np = R1.detach().numpy() / w_r  if w_r else 0
+                        r1np = R2.detach().numpy() / w_r2 if w_r2 else 0
+                        lossnp = (loss - Rpos - R1 - R2).detach().numpy()
+                        w_rp_k = np.array([r1np / lossnp, r1np / lossnp])
+                        if np.any([3 * w_rp < w_rp_k]):
+                            if verbose: print("Hyperparameters will be re-computed")
+                            activation()
+                            mink = k + 2
+                            continue
 
                 # Activation
                 if kactiv and k == kactiv:
@@ -794,29 +748,34 @@ class mustard_estimator:
         # Done, store and unwrap results back to numpy array!
 
         if estimI == "Halo" :
-            halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k, bkg_k)
+            halo.set_parameters(amplitude_k, x_mean_k, y_mean_k, x_stddev_k, y_stddev_k, theta_k)
             halo_est = ReLU(halo.generate()).detach().numpy()
         else : halo_est = 0
 
         if k > 1 and (torch.isnan(loss) or (kactiv and k > kactiv and loss > loss_evo[-1])) and self.final_estim is not None:
             L_est = abs(self.final_estim[0].detach().numpy()[0])
-            X_est = abs((self.coro * self.final_estim[1]).detach().numpy()[0])
+            X_est = abs(self.final_estim[1].detach().numpy()[0])
         else :
-            L_est, X_est = abs(Lk.detach().numpy()[0]), abs((self.coro * Xk).detach().numpy()[0])
-            self.final_estim = self.last_iter
+            L_est, X_est = abs(Lk.detach().numpy()[0]), abs(Xk.detach().numpy()[0])
 
         flux  = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
 
+        if self.final_estim is None : self.final_estim = self.last_iter
         self.last_iter = (self.final_estim[0].detach() + ReLU(halo.generate().detach()),
                          (self.coro * self.final_estim[1]).detach(), flux_k.detach(), fluxR_k.detach()) \
                         if estimI else (self.final_estim[0].detach() + ReLU(halo.generate().detach()),
                                         (self.coro * self.final_estim[1]).detach())
+
+        nice_L_est = self.coro.numpy() * frame_rotate(L_est, -self.ang_shift)
+        nice_X_est = self.coro.numpy() * frame_rotate(X_est, -self.ang_shift)
+
         # Result dict
         res = {'state'   : optimizer.state,
-               'x'       : (L_est , X_est),
-               'x_halo'  : (L_est + halo_est, X_est),
+               'x'       : (nice_L_est, nice_X_est),
+               'x_halo'  : (nice_L_est + halo_est, nice_X_est),
+               'x_no_r'  : (L_est, X_est),
                'flux'    : flux,
                'fluxR'   : fluxR,
                'loss_evo': loss_evo,
@@ -832,8 +791,14 @@ class mustard_estimator:
 
         if save :
             if not isdir(self.savedir): makedirs(self.savedir)
-            write_fits(self.savedir + "/L_est"+self.name, L_est), write_fits(self.savedir + "/X_est"+self.name, X_est)
+
+            write_fits(self.savedir + "/L_est"+self.name, nice_L_est)
+            write_fits(self.savedir + "/X_est"+self.name, nice_X_est)
+            #write_fits(self.savedir + "/X_est"+self.name, nice_X_est)
+
+
             with open(self.savedir + "/config.txt", 'w') as f:  f.write(txt_msg)
+
             if estimI :
                 write_fits(self.savedir + "/flux"+self.name, flux)
                 write_fits(self.savedir + "/fluxR"+self.name, fluxR)
@@ -859,13 +824,13 @@ class mustard_estimator:
         """Return input cube and angles"""
 
         if way == "direct" :
-            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
             reconstructed_cube = self.model.forward(*self.last_iter)  # Reconstruction on last iteration
             residual_cube = science_data - reconstructed_cube
 
         elif way == "reverse" :
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(self.device)
             reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
             residual_cube = science_data - reconstructed_cube
 
@@ -890,7 +855,9 @@ class mustard_estimator:
         if show : plt.ion()
         else : plt.ioff()
 
+        plt.close("Evolution of loss criteria")
         fig = plt.figure("Evolution of loss criteria", figsize=(16, 9))
+        plt.cla(),plt.cla()
         fig.subplots(1, 2, gridspec_kw={'width_ratios': [Kactiv, len(loss_evo)-Kactiv]})
 
         plt.subplot(121), plt.xlabel("Iteration"), plt.ylabel("Loss - log scale"), plt.yscale('log')
@@ -927,6 +894,9 @@ class mustard_estimator:
             plt.show()
 
         return self.speckles
+
+    def get_result_unrotated(self):
+        return self.res["x"]
 
     def get_ambiguity(self, show=True, save=False):
 
@@ -980,7 +950,7 @@ class mustard_estimator:
     def mustard_results(self, per_vmax=99, r_no_scale=False):
         """Return loss evolution"""
 
-        L, X = self.res["x"]
+        L, X = self.res["x_no_r"]
         cube = self.science_data
         ang  = self.model.rot_angles
         halo = self.res["halo"]
@@ -1073,7 +1043,7 @@ class mustard_estimator:
     def mustard_extrem_decomposition(self, per_vmax=99, r_no_scale=False):
         """Return loss evolution"""
 
-        L, X = self.res["x"]
+        L, X = self.res["x_no_r"]
 
         if self.science_data_ori is None: self.decompose()
 
@@ -1227,12 +1197,12 @@ class mustard_estimator:
 
         Lk, _ , flux_k, fluxR_k = self.last_iter
         if way == "direct":
-            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
             reconstructed_cube = science_data - self.model.get_Lf(Lk, flux_k, fluxR_k)
 
         elif way == "reverse":
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(self.device)
             reconstructed_cube = science_data - self.model.get_Rx(Lk, flux_k, fluxR_k, inverse=True)
 
         else : raise(ValueError,"way sould be 'reverse' or 'direct'")
@@ -1250,12 +1220,12 @@ class mustard_estimator:
         """Return input cube and angles"""
 
         if way == "direct":
-            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
             reconstructed_cube = self.model.forward(*self.last_iter)  # Reconstruction on last iteration
 
         elif way == "reverse":
             science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
+            science_data = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(self.device)
             reconstructed_cube = self.model.forward_ADI_reverse(*self.last_iter)  # Reconstruction on last iteration
 
         else : raise(ValueError,"way sould be 'reverse' or 'direct'")
@@ -1291,6 +1261,7 @@ class mustard_estimator:
 
     def set_savedir(self, savedir: str):
         self.savedir = savedir
+        if not isdir(self.savedir): makedirs(self.savedir)
 
 # %% ------------------------------------------------------------------------
 def normlizangle(angles: np.array) -> np.array:

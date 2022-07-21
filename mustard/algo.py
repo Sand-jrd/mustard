@@ -11,10 +11,6 @@ ______________________________
 @author: sand-jrd
 """
 
-from vip_hci.pca import pca_fullfr, pca_annular
-from vip_hci.preproc import cube_derotate
-from vip_hci.preproc import frame_rotate
-from vip_hci.itpca import pca_it
 from vip_hci.var import frame_center
 
 import torch
@@ -24,77 +20,6 @@ import torch.fft as tf
 import numpy as np
 from skimage.filters import threshold_multiotsu
 from vip_hci.var import frame_filter_lowpass
-
-# %% Initialisation / kind of PCA / PCA iter
-
-def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='max_common', **kwarg) -> (np.ndarray, np.ndarray):
-    """
-    Estimate Satrlight and Circoncstelar light using pca
-
-    Parameters
-    ----------
-    cube : np.ndarray
-        Cube of ADI science data
-
-    angle_list : np.ndarray
-        Rotation angle associated with the ADI cube
-
-    Imode : {'pca',''pcait}
-        mode of pca
-
-    kwarg :
-        Arguments that will be pass to vip function for pca or pcait
-
-    Returns
-    -------
-    L and X : (np.ndarray, np.ndarray)
-        Estimated starlight and circonstelar light
-    """
-
-    L_k = np.zeros(cube.shape)
-    nb_frame = cube.shape[0]
-
-    if Imode == "pca":
-        print("Mode pca")
-        res = pca_fullfr.pca(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "pcait":
-        print("Mode pca iterative")
-        res = pca_it(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "pca_annular":
-        print("Mode pca annular")
-        res = pca_annular(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "max_common":
-        print("Mode maximum in common")
-
-        science_data_derot = cube_derotate(cube, list(angle_list))
-        science_data_derot = science_data_derot
-
-        res = np.min(science_data_derot, 0)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'max_common',"
-                                         "'pca_annular','pca','pcait'}")
-
-    return  np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
-
 
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
@@ -162,6 +87,7 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
     torch.Tensor
 
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if axis == "y":
         kernel = np.array([[[1, 0, -1],
@@ -173,7 +99,7 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
                             [-1, -2, -1]]], dtype='float64')
     else : raise ValueError("'Axis' parameters should be 'x' or 'y', not"+str(axis))
 
-    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double().to(device)
 
     shape = tensor.shape
     filtered = conv2d(tensor.reshape( (1,) + shape), kernel, padding='same')
@@ -198,6 +124,7 @@ def gaussian_tensor_conv(tensor: torch.Tensor, k_size = 5) -> torch.Tensor:
     torch.Tensor
 
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if k_size == 3 :
         kernel = np.array([[[1, 2, 1],
@@ -211,7 +138,7 @@ def gaussian_tensor_conv(tensor: torch.Tensor, k_size = 5) -> torch.Tensor:
                             [1,  4,  6,  4, 1]]], dtype='float64')
     else : raise(ValueError("Kernel size can be {3,5}"))
 
-    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double().to(device)
     filtered = conv2d(tensor, kernel, padding='same')
 
     return filtered
@@ -334,6 +261,8 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
     array_resc : numpy ndarray
         Output cube with resampled frames.
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     if scale == 1:
         return array
 
@@ -355,7 +284,7 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
     #   => KF = (N"-N)/2 = round(N'*sc/2 - N/2)
     #         = round(N/2*(sc-1) + KD*sc)
     # We call yy=N/2*(sc-1) +KD*sc
-    yy = dim/2 * (scale - 1) + kd_array.double() * scale
+    yy = dim/2 * (scale - 1) + kd_array.double().to(device) * scale
 
     # We minimize the difference between the `ideal' N" and its closest
     # integer value by minimizing |yy-int(yy)|.
@@ -368,7 +297,7 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
 
     # Extract a part of array and place into dim_p array
     dim_p = int(dim + 2*kd_io)
-    tmp = torch.zeros((dim_p, dim_p)).double()
+    tmp = torch.zeros((dim_p, dim_p)).double().to(device)
     tmp[kd_io:kd_io+dim, kd_io:kd_io+dim] = array
 
     # Fourier-transform the larger array
@@ -401,7 +330,7 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
         array_resc = array_resc[(dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2,
                                 (dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2]
     elif not ori_dim and dim_pp <= dim_resc:
-        array = torch.zeros((dim_resc, dim_resc)).double()
+        array = torch.zeros((dim_resc, dim_resc)).double().to(device)
         array[(dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2,
               (dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2] = array_resc
         array_resc = array

@@ -22,6 +22,7 @@ ReLU = reluConstr()
 class Cube_model():
 
     def __init__(self, nb_frame: int, coro: np.array, psf: None or np.array):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # -- Constants
         # Sizes
@@ -63,10 +64,10 @@ class model_ADI(Cube_model):
     def forward(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
-        if flux is None: flux = torch.ones(self.nb_rframe - 1)
-        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1)
+        if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
+        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1).double().to(self.device)
 
-        Y = torch.zeros((self.nb_rframe,) + L.shape).double()
+        Y = torch.zeros((self.nb_rframe,) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
         Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
@@ -82,10 +83,10 @@ class model_ADI(Cube_model):
     def forward_ADI_reverse(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
         """ Process forward model  : Y =  ( flux * R(L) + x) )  """
 
-        if flux is None: flux = torch.ones(self.nb_rframe - 1)
-        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1)
+        if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
+        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1).double().to(self.device)
 
-        Y = torch.zeros((self.nb_rframe,) + L.shape).double()
+        Y = torch.zeros((self.nb_rframe,) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
         Rl = tensor_rotate_fft(L, -float(self.rot_angles[0]))
@@ -100,9 +101,9 @@ class model_ADI(Cube_model):
 
     def get_Lf(self, L: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
 
-        Lf = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double()
-        if flux is None: flux = torch.ones(self.nb_rframe - 1)
-        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1)
+        Lf = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double().to(self.device)
+        if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
+        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1).double().to(self.device)
         Lf[0] = ReLU(L)
 
         for frame_id in range(1, self.nb_rframe):
@@ -113,8 +114,8 @@ class model_ADI(Cube_model):
     def get_Rx(self, x: torch.Tensor, flux=None, inverse=False) -> torch.Tensor:
 
         sgn = -1 if inverse else 1
-        Rx = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double()
-        if flux is None: flux = torch.ones(self.nb_rframe - 1)
+        Rx = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double().to(self.device)
+        if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
         Rx[0] = tensor_rotate_fft(ReLU(x), sgn*float(self.rot_angles[0]))
 
         for frame_id in range(1, self.nb_rframe):
@@ -148,10 +149,10 @@ class model_ASDI(Cube_model):
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
         # TODO flux can also vary between spectraly diverse frames ??
-        if flux is None: flux = torch.ones(self.nb_rframe - 1)
-        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1)
+        if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
+        if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1).double().to(self.device)
 
-        Y = torch.zeros((self.nb_rframe, self.nb_sframe) + L.shape).double()
+        Y = torch.zeros((self.nb_rframe, self.nb_sframe) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
         Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
@@ -189,10 +190,10 @@ class model_SDI(Cube_model):
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
         # TODO flux can also vary between spectraly diverse frames ??
-        if flux is None: flux = torch.ones(self.nb_sframe - 1)
-        if fluxR is None: fluxR = torch.ones(self.nb_sframe - 1)
+        if flux is None: flux = torch.ones(self.nb_sframe - 1).double().to(self.device)
+        if fluxR is None: fluxR = torch.ones(self.nb_sframe - 1).double().to(self.device)
 
-        Y = torch.zeros((self.nb_sframe, ) + L.shape).double()
+        Y = torch.zeros((self.nb_sframe, ) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
         Sl = tensor_fft_scale(ReLU(L), float(self.scales[0]))
@@ -216,7 +217,6 @@ class Gauss_2D():
 
 
         self.indices   = torch.from_numpy(np.indices(img.shape))
-        self.bkg       = torch.FloatTensor([med])
         self.amplitude = torch.FloatTensor([res['amplitude'][0]])
         self.x_mean    = torch.FloatTensor([res['centroid_x'][0]])
         self.y_mean    = torch.FloatTensor([res['centroid_y'][0]])
@@ -224,8 +224,7 @@ class Gauss_2D():
         self.y_stddev  = torch.FloatTensor([res['fwhm_y'][0] * gaussian_fwhm_to_sigma])
         self.theta     = np.deg2rad(torch.FloatTensor([res['theta'][0]]))
 
-    def generate_k(self, amplitude=None, x_mean=None, y_mean=None, x_stddev=None, y_stddev=None, theta=None
-                   , bkg=None):
+    def generate_k(self, amplitude=None, x_mean=None, y_mean=None, x_stddev=None, y_stddev=None, theta=None):
 
         x, y = self.indices
         amplitude_k = amplitude if amplitude is not None else self.amplitude
@@ -234,8 +233,6 @@ class Gauss_2D():
         x_stddev_k  = x_stddev  if x_stddev  is not None else self.x_stddev
         y_stddev_k  = y_stddev  if y_stddev  is not None else self.y_stddev
         theta_k     = theta     if theta     is not None else self.theta
-        bkg_k       = bkg       if bkg       is not None else self.bkg
-
 
         cost2 = torch.cos(theta_k) ** 2
         sint2 = torch.sin(theta_k) ** 2
@@ -249,7 +246,7 @@ class Gauss_2D():
         c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
 
         return amplitude_k * torch.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                                    (c * ydiff ** 2))) + bkg_k
+                                    (c * ydiff ** 2)))
 
     def generate(self):
         x, y = self.indices
@@ -266,10 +263,9 @@ class Gauss_2D():
         c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
 
         return self.amplitude * torch.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                                            (c * ydiff ** 2))) + self.bkg
+                                            (c * ydiff ** 2)))
 
-    def set_parameters(self, amplitude=None, x_mean=None, y_mean=None,x_stddev=None, y_stddev=None, theta=None,
-                       bkg=None):
+    def set_parameters(self, amplitude=None, x_mean=None, y_mean=None,x_stddev=None, y_stddev=None, theta=None):
 
         if amplitude is not None : self.amplitude = amplitude
         if x_mean    is not None : self.x_mean = x_mean
@@ -277,10 +273,9 @@ class Gauss_2D():
         if x_stddev  is not None : self.x_stddev = x_stddev
         if y_stddev  is not None : self.y_stddev = y_stddev
         if theta     is not None : self.theta = theta
-        if bkg       is not None : self.bkg = bkg
 
     def get_parameters(self) :
-        return self.amplitude, self.x_mean, self.y_mean, self.x_stddev, self.y_stddev, self.theta, self.bkg
+        return self.amplitude, self.x_mean, self.y_mean, self.x_stddev, self.y_stddev, self.theta
 
 def pad_psf(M: np.array, shape) -> np.array:
     """Pad with 0 the PSF if it is too small """
