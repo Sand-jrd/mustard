@@ -33,7 +33,7 @@ from torch.nn import ReLU as relu_constr
 
 # Other
 from mustard.utils import circle, iter_to_gif, print_iter
-from mustard.model import model_ADI, model_ASDI
+from mustard.model import model_ADI, model_ASDI, Gauss_2D
 from copy import deepcopy
 
 # -- For verbose -- #
@@ -145,7 +145,7 @@ class mustard_estimator:
         # Shift the angle list around 0 (let's not include more uncertanity than necessary. Here at least one angle is 0)
         rot_angles = normlizangle(angles)
         self.ang_shift = find_nearest(rot_angles, np.median(rot_angles))
-        rot_angles -= self.ang_shift
+        rot_angles -= 0*self.ang_shift
 
         self.science_data = science_data
         self.model = model_ASDI(rot_angles, scale, self.coro, psf) if scale \
@@ -315,6 +315,32 @@ class mustard_estimator:
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
 
+    def estimate_halos(self, full_output=False, save=False):
+        self.halos = []
+        self.halos_2 = []
+        i_nb=0
+        for frame in self.science_data:
+            print("Frame N°"+str(i_nb))
+            tmp_halo = Gauss_2D(frame, mask=self.coro.numpy())
+            self.halos.append(tmp_halo.generate().numpy())
+            self.halos_2.append(tmp_halo.Hinit.numpy())
+            i_nb+=1
+        self.halos = np.array(self.halos)
+        self.halos_2 = np.array(self.halos_2)
+
+        if full_output :
+            self.no_halo = self.science_data - self.halos
+            self.no_halo_2 = self.science_data - self.halos_2
+
+            if isinstance(save,str) : self.savedir=save
+            if not isdir(self.savedir): makedirs(self.savedir)
+            write_fits(self.savedir + "/cube_no_halo", self.no_halo*self.coro.numpy())
+            write_fits(self.savedir + "/cube_no_halo_init", self.no_halo_2*self.coro.numpy())
+            write_fits(self.savedir + "/halos_est", self.halos*self.coro.numpy())
+            write_fits(self.savedir + "/halos_init", self.halos_2*self.coro.numpy())
+
+        self.science_data = self.science_data - self.halos
+
     def estimate(self, w_r=0.03, w_r2=0.03, w_pcent=True, estimI="Both", med_sub=False, weighted_rot=True, res_pos=False,
                  w_way=(0, 1), maxiter=10, gtol=1e-10, kactiv=0, kdactiv=None, save="./", suffix = '', gif=False,
                  verbose=False, history=True, init_maxL=True, min_sub=True):
@@ -421,7 +447,7 @@ class mustard_estimator:
 
         temporal_var = np.var(self.science_data, axis=0)
         temporal_var *= 1 / np.max(temporal_var)
-        self.var_pond = torch.unsqueeze(torch.from_numpy(1 / temporal_var), 0).double().to(self.device)
+        self.var_pond = 1 #torch.unsqueeze(torch.from_numpy(1 / temporal_var), 0).double().to(self.device)
 
         self.weight = self.coro * self.var_pond * self.ang_weight
 
@@ -437,7 +463,7 @@ class mustard_estimator:
         if min_sub: self.decompose()
 
         science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
-        science_data_derot_np = abs(cube_derotate(self.science_data, self.model.rot_angles, border_mode='wrap'))
+        science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
         science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double()
         # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
         # med = np.median(abs(self.science_data))
@@ -450,14 +476,12 @@ class mustard_estimator:
             warnings.warn(DeprecationWarning("Use of initalization other than max-common is not recommended."))
 
         elif init_maxL :
-            res = torch.min(science_data, axis=0)
-            R_fr = science_data_derot_np - \
-                   abs(cube_derotate(torch.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles))
+            res = np.median(self.science_data, axis=0)
+            R_fr = science_data_derot_np - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), -self.model.rot_angles)
             self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
         else :
-            res  = np.min(abs(science_data_derot_np), 0)
-            L_fr = self.science_data - \
-                abs(cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles, border_mode='wrap'))
+            res  = np.median(science_data_derot_np, axis=0)
+            L_fr = self.science_data - cube_derotate(np.tile(res, (self.nb_frame, 1, 1)), self.model.rot_angles)
             self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), res.clip(min=0)
 
         L0, X0 = self.L0x0[0], self.L0x0[1]
@@ -537,16 +561,6 @@ class mustard_estimator:
             # Compute regularization(s)
             R1 = Ractiv * w_r * self.regul(Xk, Lk)  if Ractiv * w_r else 0
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask) if Ractiv * w_r2 else 0
-
-            if res_pos :
-                Rx_smooth = self.model.get_Rx(Xk, flux_k)
-                Lf = self.model.get_Lf(Lk, flux_k, fluxR_k)
-                nospeck = ReLU(science_data - Rx_smooth)
-                Rpos = torch.sum(self.weight * self.coro * ReLU(Yk - science_data) ** 2)
-                self.map_neg = Yk - science_data
-                self.map_negR = ReLU(Yk - science_data)
-                Rpos *=  1 #self.nb_frame-1 #**2 #Rpos weight
-            else : Rpos = 0
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum( self.weight * self.coro * (Yk - science_data) ** 2) + \
@@ -646,18 +660,6 @@ class mustard_estimator:
 
         try :
             for k in range(1, maxiter+1):
-
-                # Ajustement of hyperparameters
-                if k > mink and (Ractiv * w_r or Ractiv * w_r2):
-                    r1np = R1.detach().numpy() if w_r else 0
-                    r2np = R2.detach().numpy() if w_r2 else 0
-                    lossnp = (loss - Rpos - R1 - R2).detach().numpy()
-                    w_rp_k = np.array([r1np / lossnp, r2np / lossnp])
-                    if np.any(np.array([3 * w_rp < w_rp_k, (1/3) * w_rp > w_rp_k])):
-                        if verbose: print("Hyperparameters will be re-computed")
-                        activation()
-                        mink = k + 2
-                        continue
 
                 # Activation
                 if kactiv and k == kactiv:
