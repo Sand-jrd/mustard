@@ -20,6 +20,7 @@ import torch.fft as tf
 import numpy as np
 from skimage.filters import threshold_multiotsu
 from vip_hci.var import frame_filter_lowpass
+import torch.optim as optim
 
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
@@ -372,4 +373,3 @@ def convert_to_mask(img: np.ndarray):
     mask = frame_filter_lowpass(img_m)
 
     return mask
-
