@@ -13,9 +13,16 @@ ______________________________
 
 import numpy as np
 import torch
-from mustard.algo import tensor_rotate_fft, tensor_conv, tensor_fft_scale
+from mustard.algo import tensor_conv, tensor_rotate_fft, tensor_fft_scale #,
+from torchvision.transforms.functional import rotate
+from torchvision.transforms.functional import scale as scaletf
+from torchvision.transforms.functional import InterpolationMode
 from torch.nn import ReLU as reluConstr
 ReLU = reluConstr()
+
+
+tensor_rotate_fft =  lambda frame, angle : rotate(frame, angle, InterpolationMode.BILINEAR)
+#tensor_fft_scale = lambda frame, scale : scaletf(frame, scale)
 
 class Cube_model():
 
@@ -96,17 +103,25 @@ class model_ADI(Cube_model):
 
         return Y
 
-    def get_Lf(self, L: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
+    def get_Lf(self, L: torch.Tensor, flux=None, fluxR=None, rot=False) -> torch.Tensor:
 
         Lf = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double().to(self.device)
         if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
         if fluxR is None: fluxR = torch.ones(self.nb_rframe - 1).double().to(self.device)
         Lf[0] = ReLU(L)
 
-        for frame_id in range(1, self.nb_rframe):
-            Lf[frame_id] = fluxR[frame_id - 1] * flux[frame_id - 1] * ReLU(L)
+        if rot:
+            Lf[0] = tensor_rotate_fft(ReLU(L), float(self.rot_angles[0]))
+            for frame_id in range(1, self.nb_rframe):
+                Lf[frame_id] = fluxR[frame_id - 1] * flux[frame_id - 1] * \
+                               tensor_rotate_fft(ReLU(L), float(self.rot_angles[frame_id]))
+            return Lf
 
-        return  Lf
+        else :
+            for frame_id in range(1, self.nb_rframe):
+                Lf[frame_id] = fluxR[frame_id - 1] * flux[frame_id - 1] * ReLU(L)
+
+            return  Lf
 
     def get_Rx(self, x: torch.Tensor, flux=None, inverse=False) -> torch.Tensor:
 
@@ -187,18 +202,17 @@ class model_SDI(Cube_model):
     def forward(self, L: torch.Tensor, x: torch.Tensor, flux=None, fluxR=None) -> torch.Tensor:
         """ Process forward model  : Y =  ( flux * L + R(x) )  """
 
-        # TODO flux can also vary between spectraly diverse frames ??
         if flux is None: flux = torch.ones(self.nb_sframe - 1).double().to(self.device)
         if fluxR is None: fluxR = torch.ones(self.nb_sframe - 1).double().to(self.device)
 
         Y = torch.zeros((self.nb_sframe, ) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
-        Sl = tensor_fft_scale(ReLU(L), float(self.scales[0]))
+        Sl = tensor_fft_scale(ReLU(L), 1/float(self.scales[0]))
         Y[0] = Sl + ReLU(x)
 
         for id_s in range(1, self.nb_sframe):
-            Sl = tensor_fft_scale(ReLU(L), float(self.scales[id_s]))
+            Sl = tensor_fft_scale(ReLU(L), 1/float(self.scales[id_s]))
             if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
             Y[id_s] = flux[id_s - 1] * ( fluxR[id_s - 1] * Sl + ReLU(x) )
 
@@ -216,9 +230,9 @@ class Gauss_2D():
         from scipy.optimize import (fmin_slsqp, minimize) # SLSQP, not very robust, minimiz truct better
         from scipy.optimize import NonlinearConstraint
 
-        # from torchmin import minimize_constr # troch wrapper for trust_const but it is beta :(
+        from torchmin import minimize_constr # troch wrapper for trust_const but it is beta :(
         from astropy.stats import gaussian_sigma_to_fwhm, gaussian_fwhm_to_sigma
-        from vip_hci.var import fit_2dgaussian
+        from vip_hci.var import fit_2dgaussian, fit_2d2gaussian
 
         # Initilisation
         amplitude = np.max(mask*img) - np.min(img)
@@ -267,6 +281,17 @@ class Gauss_2D():
             """Distance to the model"""
             return np.linalg.norm(mask*(abs(img) - model(param)), 2)**2
 
+        res = fit_2dgaussian(img, full_output=True, debug=False)
+        amplitude, theta  = res['amplitude'][0], res['theta'][0]
+        x_stddev, y_stddev = res['fwhm_x'][0] * gaussian_fwhm_to_sigma, res['fwhm_y'][0] * gaussian_fwhm_to_sigma
+
+        self.amplitude = torch.FloatTensor([amplitude])
+        self.x_stddev  = torch.FloatTensor([x_stddev])
+        self.y_stddev  = torch.FloatTensor([y_stddev])
+        self.theta     = np.deg2rad(torch.FloatTensor([theta]))
+        self.Hinit_no_mask = self.generate()
+
+        # res = fit_2d2gaussian(img*mask, full_output=True, debug=False)
         res = fit_2dgaussian(mask*abs(img), full_output=True, debug=False, weights=mask)
         amplitude, theta  = res['amplitude'][0], res['theta'][0]
         x_stddev, y_stddev = res['fwhm_x'][0] * gaussian_fwhm_to_sigma, res['fwhm_y'][0] * gaussian_fwhm_to_sigma
@@ -286,7 +311,7 @@ class Gauss_2D():
         res = fmin_slsqp(objective_function, param, f_ieqcons=f_const)
         # res = minimize(objective_function, param, method='trust-constr', constraints=cons_obj)
         # res = minimize_constr(objective_function, param,constr=cons_dict)
-        print("Done")
+        # print("Done")
 
         amplitude, x_stddev, y_stddev, theta = res
         self.amplitude = torch.FloatTensor([amplitude])

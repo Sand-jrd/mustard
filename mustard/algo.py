@@ -24,6 +24,7 @@ from vip_hci.var import frame_filter_lowpass
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
 
+
 def laplacian_tensor_conv(tensor: torch.Tensor, kernel_size=3) -> torch.Tensor:
     """
     Apply laplacian filter on input tensor X
@@ -154,12 +155,12 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         large-scale Gibbs artefacts, so make sure no sharp edge is present in
         the image to be rotated.
 
-        /!\ This is a blindly coded adaptation for Tensor of the vip function rotate_fft
+        (!) This is a blindly coded adaptation for Tensor of the vip function rotate_fft
         (https://github.com/vortex-exoplanet/VIP/blob/51e1d734dcdbee1fbd0175aa3d0ab62eec83d5fa/vip_hci/preproc/derotation.py#L507)
 
-        /!\ This suppose the frame is perfectly centred
+        (!) This suppose the frame is perfectly centred
 
-        ! Warning: if input frame has even dimensions, the center of rotation
+        (!) Warning: if input frame has even dimensions, the center of rotation
         will NOT be between the 4 central pixels, instead it will be on the top
         right of those 4 pixels. Make sure your images are centered with
         respect to that pixel before rotation.
@@ -194,7 +195,7 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         dangle = angle
         tensor_in = tensor.clone()
 
-    if y_ori%2 or x_ori%2:
+    if y_ori % 2 or x_ori % 2:
         # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
         tensor_in = tensor_in[:, :-1, :-1]
 
@@ -216,7 +217,6 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         array_out = torch.zeros([1, s_xyx.shape[1]+1, s_xyx.shape[2]+1])
         array_out[0, :-1, :-1] = torch.real(s_xyx)
     else:
-        array_out = torch.zeros([1, s_xyx.shape[1], s_xyx.shape[2]])
         array_out = torch.real(s_xyx)
 
     return array_out
@@ -240,7 +240,7 @@ def tensor_fft_shear(arr, arr_ori, c, ax):
     return s_x
 
 
-def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
+def tensor_fft_scale(array: torch.Tensor, scale: float, ori_dim=True):
     """
     Resample the frames of a cube with a single scale factor using a FFT-based
     method.
@@ -266,12 +266,17 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
     if scale == 1:
         return array
 
-    if array.shape[0] % 2:
+
+
+    if array.shape[0] % 2 :
         odd = True
-        array_even = torch.zeros([array.shape[0] + 1, array.shape[1] + 1])
-        array_even[1:, 1:] = array
+        array_even = torch.zeros([array.shape[1] + 1, array.shape[2] + 1])
+        array_even[1:, 1:] = array[0]
         array = array_even
     else:
+        array_even = torch.zeros([array.shape[1], array.shape[2]])
+        array_even[:, :] = array[0]
+        array = array_even
         odd = False
 
     dim = array.shape[0]  # even square
@@ -290,7 +295,7 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
     # integer value by minimizing |yy-int(yy)|.
     kf_array = torch.round(yy).int()
     tmp = torch.abs(yy-kf_array)
-    imin = torch.argmin(tmp)  #Nan values not handled
+    imin = torch.argmin(tmp)  # Nan values not handled
 
     kd_io = kd_array[imin]
     kf_io = kf_array[imin]
@@ -316,7 +321,7 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
 
     # inverse Fourier-transform the FT
     tmp = tf.ifft2(tf.fftshift(tmp))
-    array_resc = tmp.real
+    array_resc = torch.real(tmp)
     del tmp
 
     # Extract a part of or expand the scaled image to desired number of pixels
@@ -341,17 +346,23 @@ def tensor_fft_scale(array: torch.Tensor, scale: int, ori_dim=True):
         scaled[-kf_io:-kf_io+dim_pp, -kf_io:-kf_io+dim_pp] = array_resc
         array_resc = scaled
 
-    array_resc /= scale * scale
+    # array_resc /= scale * scale
 
     if odd:
-        array_tmp = torch.zeros([array_resc.shape[0] - 1, array_resc.shape[1] - 1])
-        array_tmp = array_resc[1:, 1:]
+        array_tmp = torch.zeros([1, array_resc.shape[0]-1, array_resc.shape[1]-1])
+        array_tmp[0] = array_resc[1:, 1:]
+        array_resc = array_tmp
+    else :
+        array_tmp = torch.zeros([1, array_resc.shape[0], array_resc.shape[1]])
+        array_tmp[0] = array_resc
         array_resc = array_tmp
 
     return array_resc
 
+
 def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.abs(tf.ifftshift(tf.ifft2(tf.fftshift(tf.fft2(x)) * tf.fftshift(tf.fft2(y)))))
+
 
 def convert_to_mask(img: np.ndarray):
     """ Convert an image into a binary mask
@@ -372,4 +383,3 @@ def convert_to_mask(img: np.ndarray):
     mask = frame_filter_lowpass(img_m)
 
     return mask
-
