@@ -13,16 +13,25 @@ ______________________________
 
 import numpy as np
 import torch
-from mustard.algo import tensor_conv, tensor_rotate_fft, tensor_fft_scale #,
+
+# FFT tensor operator
+from mustard.algo import tensor_conv, tensor_rotate_fft, tensor_fft_scale
+
+# Regular interpolated tensor operators
 from torchvision.transforms.functional import rotate
 from torchvision.transforms.functional import scale as scaletf
 from torchvision.transforms.functional import InterpolationMode
+
+# ReLu
 from torch.nn import ReLU as reluConstr
 ReLU = reluConstr()
 
+# I used this to switch rotation methods
+# Could have been added as an option or chose the one to keep...
+tensor_rotate =  lambda frame, angle : rotate(frame, angle, InterpolationMode.BILINEAR) # OR tensor_rotate_fft(frame, angle)
+tensor_scale = lambda frame, scale : scaletf(frame, scale) # OR tensor_fft_scale(frame, scale)
 
-tensor_rotate_fft =  lambda frame, angle : rotate(frame, angle, InterpolationMode.BILINEAR)
-#tensor_fft_scale = lambda frame, scale : scaletf(frame, scale)
+# %% Mother class
 
 class Cube_model():
 
@@ -50,6 +59,7 @@ class Cube_model():
         return None
 
 # %% Forward ADI model :
+    
 class model_ADI(Cube_model):
     """ Forward models
         
@@ -74,11 +84,11 @@ class model_ADI(Cube_model):
         Y = torch.zeros((self.nb_rframe,) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
-        Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
+        Rx = tensor_rotate(ReLU(x), float(self.rot_angles[0]))
         Y[0] =  ReLU(L + Rx)
 
         for frame_id in range(1, self.nb_rframe):
-            Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[frame_id]))
+            Rx = tensor_rotate(ReLU(x), float(self.rot_angles[frame_id]))
             if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
             Y[frame_id] =  ReLU(flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(L) + Rx))
 
@@ -93,11 +103,11 @@ class model_ADI(Cube_model):
         Y = torch.zeros((self.nb_rframe,) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
-        Rl = tensor_rotate_fft(L, -float(self.rot_angles[0]))
+        Rl = tensor_rotate(L, -float(self.rot_angles[0]))
         Y[0] = ReLU(Rl) + self.coro * ReLU(x)
 
         for frame_id in range(1, self.nb_rframe):
-            RL = tensor_rotate_fft(ReLU(L), -float(self.rot_angles[frame_id]))
+            RL = tensor_rotate(ReLU(L), -float(self.rot_angles[frame_id]))
             if self.psf is not None: x = tensor_conv(ReLU(x), self.psf)
             Y[frame_id] = ReLU(flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(RL) + ReLU(x)))
 
@@ -111,10 +121,10 @@ class model_ADI(Cube_model):
         Lf[0] = ReLU(L)
 
         if rot:
-            Lf[0] = tensor_rotate_fft(ReLU(L), float(self.rot_angles[0]))
+            Lf[0] = tensor_rotate(ReLU(L), float(self.rot_angles[0]))
             for frame_id in range(1, self.nb_rframe):
                 Lf[frame_id] = fluxR[frame_id - 1] * flux[frame_id - 1] * \
-                               tensor_rotate_fft(ReLU(L), float(self.rot_angles[frame_id]))
+                               tensor_rotate(ReLU(L), float(self.rot_angles[frame_id]))
             return Lf
 
         else :
@@ -128,15 +138,16 @@ class model_ADI(Cube_model):
         sgn = -1 if inverse else 1
         Rx = torch.zeros((self.nb_rframe, 1) + self.frame_shape).double().to(self.device)
         if flux is None: flux = torch.ones(self.nb_rframe - 1).double().to(self.device)
-        Rx[0] = tensor_rotate_fft(ReLU(x), sgn*float(self.rot_angles[0]))
+        Rx[0] = tensor_rotate(ReLU(x), sgn*float(self.rot_angles[0]))
 
         for frame_id in range(1, self.nb_rframe):
-            Rx[frame_id] =  ReLU(flux[frame_id - 1] * tensor_rotate_fft(ReLU(x), sgn*float(self.rot_angles[frame_id])))
+            Rx[frame_id] =  ReLU(flux[frame_id - 1] * tensor_rotate(ReLU(x), sgn*float(self.rot_angles[frame_id])))
 
         return Rx
 
 
-# %% Forward ADI model :
+# %% Forward ASDI model :
+    
 class model_ASDI(Cube_model):
     """ Forward models as presented in mayo
 
@@ -167,20 +178,22 @@ class model_ASDI(Cube_model):
         Y = torch.zeros((self.nb_rframe, self.nb_sframe) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
-        Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[0]))
-        Sl = tensor_fft_scale(ReLU(L), float(self.scales[0]))
+        Rx = tensor_rotate(ReLU(x), float(self.rot_angles[0]))
+        Sl = tensor_scale(ReLU(L), float(self.scales[0]))
         Y[0] = Sl + Rx
 
         for id_r in range(1, self.nb_rframe):
             for id_s in range(0, self.nb_sframe):
-                Rx = tensor_rotate_fft(ReLU(x), float(self.rot_angles[id_r]))
-                Sl = tensor_fft_scale(ReLU(L), float(self.scales[id_s]))
+                Rx = tensor_rotate(ReLU(x), float(self.rot_angles[id_r]))
+                Sl = tensor_scale(ReLU(L), float(self.scales[id_s]))
                 if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
                 Y[id_r, id_s] = flux[id_r - 1] * ( fluxR[id_r - 1] * Sl + Rx )
 
         return Y
 
 
+# %% Forward SDI model :
+    
 class model_SDI(Cube_model):
     """ Forward models as presented in mayo
 
@@ -208,15 +221,18 @@ class model_SDI(Cube_model):
         Y = torch.zeros((self.nb_sframe, ) + L.shape).double().to(self.device)
 
         # First image. No intensity vector
-        Sl = tensor_fft_scale(ReLU(L), 1/float(self.scales[0]))
+        Sl = tensor_scale(ReLU(L), 1/float(self.scales[0]))
         Y[0] = Sl + ReLU(x)
 
         for id_s in range(1, self.nb_sframe):
-            Sl = tensor_fft_scale(ReLU(L), 1/float(self.scales[id_s]))
-            if self.psf is not None: Rx = tensor_conv(Rx, self.psf)
+            Sl = tensor_scale(ReLU(L), 1/float(self.scales[id_s]))
             Y[id_s] = flux[id_s - 1] * ( fluxR[id_s - 1] * Sl + ReLU(x) )
 
         return Y
+    
+
+# %% Gauss 2D Model (stellar halo model) :
+    
 class Gauss_2D():
     """ Torch implementation of Gaussian modeling.
     Inspired from astropy.modeling.Fittable2DModel Gaussian2D """

@@ -24,7 +24,6 @@ from vip_hci.var import frame_filter_lowpass
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
 
-
 def laplacian_tensor_conv(tensor: torch.Tensor, kernel_size=3) -> torch.Tensor:
     """
     Apply laplacian filter on input tensor X
@@ -383,3 +382,62 @@ def convert_to_mask(img: np.ndarray):
     mask = frame_filter_lowpass(img_m)
 
     return mask
+
+# %% Radial profile
+
+def create_radial_prof_matirx(shape:torch.Tensor, bin_size=1, r2_scale=False) -> torch.Tensor:
+
+    y, x = np.indices(shape)
+    y, x = torch.from_numpy(y), torch.from_numpy(x)
+
+    mid = shape[0] / 2
+    rr = torch.sqrt((x - mid) ** 2 + (y - mid) ** 2)
+
+    rad_max = torch.max(rr)
+
+    nb_anns = torch.floor(rad_max / bin_size).type(torch.IntTensor)
+    rad_prof_transform = torch.ones(shape[0]**2, nb_anns, dtype=torch.double)
+
+    for r in range(nb_anns):
+        ann = (rr < (r * bin_size) + 1) * (rr >= r * bin_size)
+        rad_prof_transform[:, r] *= torch.flatten(ann)/torch.sum(ann)
+        if r2_scale : rad_prof_transform[:, r] *= r**2
+
+    return rad_prof_transform
+
+def radial_profil(M: torch.Tensor, rad_prof_transform: torch.Tensor, norm_bkg=10):
+    """Generate radial profil using transformation matrix. 
+    Use 'create_radial_prof_matirx' to generate rad_prof_transform"""
+    
+    radial_prof = torch.flatten(M) @ rad_prof_transform
+    if norm_bkg : radial_prof -= torch.mean(radial_prof[-norm_bkg:])
+
+    return radial_prof/torch.max(radial_prof)
+
+def res_non_convexe(Rp: torch.Tensor, pup_size=8) -> float :
+    """Sum of positive slope -- can be used as a regualrizator to penalize
+    non-negative slope and enforce a slope that """
+    
+    slope = (Rp[pup_size + 1:] - Rp[pup_size:-1]).clip(min=0)
+
+    return torch.sum(slope)
+
+def radial_profil_bins(M: torch.Tensor, y, x, bin_size=1, norm_bkg=10) -> torch.Tensor:
+    """Generate radial profil. Same operation as 'radial_profil' but do not generate 
+    the tranformation matrix. Not optimal for a ML usage"""
+    
+    mid = M.shape[0] // 2
+    rr = torch.sqrt((x - mid) ** 2 + (y - mid) ** 2)
+
+    means = []
+    rad_max = torch.max(rr)
+
+    nb_anns = torch.floor(rad_max / bin_size).type(torch.IntTensor)
+    for r in range(nb_anns):
+        ann = (rr < (r * bin_size) + 1) * (rr >= r * bin_size)
+        means.append(torch.mean(M[ann]))
+
+    radial_prof = torch.FloatTensor(means)
+    if norm_bkg : radial_prof -= torch.mean(radial_prof[-norm_bkg:])
+
+    return radial_prof

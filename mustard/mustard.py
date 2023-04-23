@@ -12,28 +12,30 @@ ______________________________
 @author: sand-jrd
 """
 
-# For file management
+# -- For file management -- #
 from vip_hci.fits import write_fits
-from vip_hci.preproc import cube_derotate, frame_rotate, cube_rescaling_wavelengths, cube_crop_frames
-
 from os import makedirs, remove, rmdir
 from os.path import isdir
 
-# Algo and science model
-import mustard.model
-from mustard.algo import sobel_tensor_conv, convert_to_mask
+# -- Algo and science model -- #
+from mustard.model import model_ADI, model_ASDI, model_SDI
+from mustard.algo import sobel_tensor_conv, convert_to_mask, radial_profil, res_non_convexe, create_radial_prof_matirx
 
-import torch
-import numpy as np
+# Numpy operators                          
+from vip_hci.preproc import cube_derotate, frame_rotate,cube_rescaling_wavelengths, cube_crop_frames
+# Torch operators
+from torchvision.transforms.functional import rotate
+from torchvision.transforms.functional import InterpolationMode
 
-# Loss functions
+# -- Loss functions -- #
 import torch.optim as optim
 from torch import sum as tsum
 from torch.nn import ReLU as relu_constr
 
-# Other
-from mustard.utils import circle, iter_to_gif, print_iter, radial_profil, res_non_convexe, create_radial_prof_matirx
-from mustard.model import model_ADI, model_ASDI, model_SDI, Gauss_2D
+# -- Misk -- #
+import torch
+import numpy as np
+from mustard.utils import circle, iter_to_gif, print_iter
 from copy import deepcopy
 
 # -- For verbose -- #
@@ -42,18 +44,9 @@ import matplotlib.pyplot as plt
 import warnings
 from PIL import Image
 
-# -- Tools -- #
-from torchvision.transforms.functional import rotate
-from torchvision.transforms.functional import InterpolationMode
 
 
-def cube_rotate(cube, angles):
-    new_cube = torch.zeros(cube.shape)
-    for ii in range(len(angles)):
-        new_cube[ii] = rotate(torch.unsqueeze(cube[ii], 0), float(angles[ii]),
-                              InterpolationMode.BILINEAR)[0]
-    return new_cube
-
+# %% Verbose material
 
 sep = ('_' * 50)
 head = "|it |       loss        |        R1        |        R2        |       total      |"
@@ -70,13 +63,6 @@ activ_msg = "REGUL HAVE BEEN {} with w_r={:.2f} and w_r2={:.2f}"
 
 ReLU = relu_constr()
 
-
-def find_nearest(array, value):
-    array = np.asarray(array)
-    idx = (np.abs(array - value)).argmin()
-    return array[idx]
-
-
 def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
     """ Compute Regul weight over data attachment terme """
     return tuple(np.array((1, 100 / L)) * (L - Ractiv * (abs(R1) + abs(R2)))) + \
@@ -85,8 +71,9 @@ def loss_ratio(Ractiv: int or bool, R1: float, R2: float, L: float) -> tuple:
 
 
 # %% ------------------------------------------------------------------------
+
 class mustard_estimator:
-    """ Neo-mayo Algorithm main class  """
+    """ MUSTARD Algorithm main class  """
 
     def __init__(self, science_data: np.ndarray, angles: np.ndarray, scale=None, coro=6, pupil="edge",
                  psf=None, hid_mask=None, Badframes=None, savedir='./', ref=None):
@@ -114,7 +101,11 @@ class mustard_estimator:
 
         psf : np.ndarray or None
             If a psf is provided, will perform deconvolution (i.e conv by psf inculded in forward model)
-
+            
+        Hid_mask: np.array or None
+            Mask to indicate the corrected region.
+            Used for coronograph with specific corrected area (i.e : vapp)
+            
         Badframes : tuple or list or None
             Bad frames that you will not be taken into account
 
@@ -136,25 +127,50 @@ class mustard_estimator:
         self.name = ''
         self.savedir = savedir
 
+        # Add refs to cube if refs are provided.
         if ref is not None :
             self.nb_ref = ref.shape[0]
             science_data = np.concatenate((science_data, ref), axis=0)
         else : self.nb_ref = 0
-
-        if angles is not None and scale is not None:
+        
+        # Normalize angles list if provided
+        rot_angles = None
+        if angles is not None:
+            rot_angles = normlizangle(angles)
+            order = rot_angles.argsort()
+            rot_angles = rot_angles[order]
+            science_data = science_data[order]
+            ## These two commented lines shift angle list in order to minimize the amplitude of rotation during processing
+            # self.ang_shift = find_nearest(rot_angles, np.median(rot_angles))
+            # rot_angles -= self.ang_shift
+        
+        # ADI / SDI / ASDI modes selcted based on provided angles & scales
+        if scale is not None and angles is not None:
+            # Mode ASDI
             self.shape = science_data[0, 0].shape
             self.nb_frame = science_data.shape[0]
             if science_data.shape[0] != len(angles) or science_data.shape[1] != len(scale):
                 raise "Length of scales does not match the size of the science-data cube !"
-        else:
+            self.model = model_ASDI(rot_angles, scale, self.coro, psf)
+        
+        elif angles is None and scale is None:
+            # User forgot something..
+            raise "List of angles or/and scales are required !"
+        
+        elif scale is not None:
+            # Mode SDI
+           self.shape = science_data[0].shape
+           self.nb_frame = science_data.shape[0]  
+           if self.nb_frame != len(scale) : raise "Length of scales does not match the size of the science-data cube !"
+           self.model = model_SDI(scale, self.coro, psf)
+
+        elif angles is not None:
+            # Mode ADI
             self.shape = science_data[0].shape
-            self.nb_frame = science_data.shape[0]
-            if angles is not None and self.nb_frame != len(angles):
-                raise "Length of angless does not match the size of the science-data cube !"
-            elif scale is not None and self.nb_frame != len(scale):
-                raise "Length of scales does not match the size of the science-data cube !"
-            elif angles is None and scale is None:
-                raise "List of angles or/and scales are required !"
+            self.nb_frame = science_data.shape[0]   
+            if self.nb_frame != len(angles) : raise "Length of angles does not match the size of the science-data cube !"
+            self.model = model_ADI(rot_angles, self.coro, psf)
+
 
         # Coro and pupil masks
         pupilR = pupil
@@ -169,38 +185,22 @@ class mustard_estimator:
         else:
             raise ValueError("Invalid pupil key argument. Possible values : {float/int, None, 'edge'}")
 
-        self.pup_bkg = np.ones(
-            self.shape)  # circle(self.shape, self.shape[0]/2) - circle(self.shape, self.shape[0]/2-15)
+        # Pup_bgk used to compute background intensity value using the outer annulus of 15 pixels
+        self.pup_bkg = circle(self.shape, self.shape[0]/2) - circle(self.shape, self.shape[0]/2-15)
 
+        # Coro mask + coro mask for regul (bigger to avoid border effect)
         if coro is None: coro = 3
         self.coro_siz = coro
         self.coro = (1 - circle(self.shape, coro)) * pupil
         self.coroR = (1 - circle(self.shape, coro+2)) * pupilR
-
         self.final_mask = deepcopy(self.coro)
-
+        
+        # For specific corrected region. 
         if hid_mask is not None:
             self.hid_mask = True
             self.coro = hid_mask
 
-        # Shift the angle list to 0 (let's not include more uncertanity than necessary. Here at least one angle is 0)
-        rot_angles = None
-        if angles is not None:
-            rot_angles = normlizangle(angles)
-            order = rot_angles.argsort()
-            rot_angles = rot_angles[order]
-            science_data = science_data[order]
-            self.ang_shift = find_nearest(rot_angles, np.median(rot_angles))
-            rot_angles -= 0 * self.ang_shift
-
-        self.science_data = science_data
-        if scale is not None and rot_angles is not None:
-            self.model = model_ASDI(rot_angles, scale, self.coro, psf)
-        elif scale is not None:
-            self.model = model_SDI(scale, self.coro, psf)
-        elif angles is not None:
-            self.model = model_ADI(rot_angles, self.coro, psf)
-
+        
         # Will be filled with weight if anf_weight option is activated
         self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double()
 
@@ -209,284 +209,30 @@ class mustard_estimator:
 
         # -- Configure regularization (can be change later, this is defaults parameters)
         self.config = ["smooth", None, 'No' if psf is None else 'With', 'no', 'Both L and X']
-        #self.configR2(Msk=None, mode="l1", penaliz="X")
         self.configR1(mode="smooth")
+        self.configR2(Msk=None, mode="l1", penaliz="X")
         self.configR3(mode="smooth")
 
+        # Mask used for initalization.
         self.ref_mask = torch.Tensor((1 - circle(self.shape, coro + 2)) * circle(self.shape, self.shape[0] / 2 - 2))
         self.ref_mask_siz = [coro + 2, self.shape[0] / 2 - 2]
 
-        self.res = None;
-        self.last_iter = None;
-        self.first_iter = None;
-        self.final_estim = None
+        # Itilisization of varaibles.
+        self.res = None; # Will store full output results in a dict
+        self.last_iter = None; # (X_k, L_k, +option_k)
+        self.first_iter = None; # (X_0, L_0, +option_0)
+        self.final_estim = None # (X_est, L_est, +option_est)
+        
+        # (todelete)
         self.ambiguities = None;
-        self.speckles = None;
-        self.science_data_ori = None  # init results vars
+        self.speckles = None; 
+        self.science_data_ori = None  
         self.pup_bkg_id = torch.tensor(np.array(np.where(self.pup_bkg == 1)), dtype=torch.long)
-
         self.science_data[np.where(self.science_data == 0)] = np.finfo(float).eps
 
+    # (todelete)
     def compute_bkg(self, X):
         return torch.median(X[self.pup_bkg_id])
-
-    def set_init(self, X0=None, L0=None, RDI=False):
-        """
-        Define initialization by yourslef.
-
-        Parameters
-        ----------
-        RDI : bool (??)
-
-        X0 : numpy.ndarry or None
-            Init of circumstellar map
-        L0 : numpy.ndarry or None
-            Init of speakles map
-
-        Returns
-        -------
-
-        """
-        if L0 is None and X0 is None:
-            raise (AssertionError("At least one argument must be provided"))
-
-        if RDI:
-            res = np.min(self.science_data, 0)
-            L0 = (L0 + res) // 2
-            R_fr = cube_derotate(self.science_data - L0, self.model.rot_angles)
-            X0 = np.mean(R_fr, axis=0).clip(min=0)
-            # L0 = np.min(self.science_data -
-            # cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
-
-        else:
-            if X0 is None:
-                X0 = np.mean(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
-            elif L0 is None:
-                L0 = np.mean(self.science_data -
-                             cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
-
-        self.L0x0 = (L0.clip(0), X0.clip(0))
-
-    def configR1(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
-        """ Configuration of first regularization. (smooth-like)"""
-
-        if mode == "smooth_with_edges":
-            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
-                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
-        elif mode == "smooth":
-            self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
-                                    torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
-
-        elif mode == "l1":
-            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
-
-        self.p_L = p_L
-        self.p_X = p_X
-
-        if smoothL:
-            self.regul = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
-        else:
-            self.regul = lambda X, L: self.smooth(X)
-
-    def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
-        """ Configuration of first regularization. (smooth-like)"""
-
-        if mode == "smooth_with_edges":
-            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
-                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
-        elif mode == "smooth":
-            self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
-                                    torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
-
-        elif mode == "l1":
-            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
-
-        else:
-            self.smooth = lambda X: 0
-
-        self.p_L = p_L
-        self.p_X = p_X
-
-        if smoothL:
-            self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
-        else:
-            self.regul3 = lambda X, L: self.smooth(X)
-
-    def configR2(self, Msk=None, mode="mask", penaliz="X", invert=False, save=False):
-        """ Configuration for Second regularization.
-        Two possible mode :   R = M*X      (mode 'mask')
-                           or R = dist(M-X) (mode 'dist')
-                           or R = sum(X)   (mode 'l1')
-
-        Parameters
-        ----------
-        save : False
-            Save your mask
-
-        Msk : numpy.array or torch.tensor
-            Prior mask of X.
-
-        mode : {"mask","dist"}.
-            if "mask" :  R = norm(M*X)
-                if M will be normalize to have values from 0 to 1.
-            if "dist" :  R = dist(M-X)
-
-        penaliz : {"X","L","both"}
-            Unknown to penaliz.
-            With mode mask :
-                if "X" : R = norm(M*X)
-                if "L" : R = norm((1-M)*L)
-                if "B" : R = norm(M*X) + norm((1-M)*L)
-            With mode dist :
-                if "X" : R = dist(M-X)
-                if "L" : R = dist(M-L)
-                if "B" : R = dist(M-X) - dist(M-L)
-            With mode l1 :
-                if "X" : R = sum(X)
-                if "L" : R = sum(L)
-                if "B" : R = sum(X) - sum(L)
-
-        invert : Bool
-            Reverse penalize mode bewteen L and X.
-
-        Returns
-        -------
-
-        """
-        if mode == "pdi":
-            Msk = convert_to_mask(Msk)
-            mode = "mask"
-
-        if mode != 'l1':
-            if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
-            if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
-                raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
-
-        if Msk is not None and (mode != 'mask' and mode != 'ref'):
-            warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
-
-        self.F_rp = create_radial_prof_matirx(self.model.frame_shape)  # Radial profil transform
-        # y, x = np.indices(self.model.frame_shape)
-        # self.yx = torch.from_numpy(y), torch.from_numpy(x)
-
-        penaliz = penaliz.capitalize()
-        rM = self.coroR  # corono mask for regul
-        if penaliz not in ("X", "L", "Both", "B"):
-            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
-
-        if mode == "dist":
-            self.mask = Msk
-            sign = -1 if invert else 1
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M: tsum(rM * (M - X) ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M: tsum(rM * (M - L) ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M: sign * (tsum(rM * (M - X) ** 2) -
-                                                      tsum(rM * (M - L) ** 2))
-
-        elif mode == "mask":
-            Msk = Msk / torch.max(Msk)  # Normalize mask
-            self.mask = (1 - Msk) if invert else Msk
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M, amp: tsum(rM * ((1 - M) * L) ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2) + \
-                                                   tsum(rM * M) ** 2 / tsum(rM * (1 - M)) ** 2 * \
-                                                   tsum(rM * ((1 - M) * L) ** 2) + \
-                                                   res_non_convexe(radial_profil(L, self.F_rp))
-
-        elif mode == "l1":
-            sign = -1 if invert else 1
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M: tsum(X ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M: tsum(L ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
-
-        elif mode == "ref":
-            self.mask = np.mean(cube_derotate(np.tile(Msk, (self.nb_frame, 1, 1)), self.model.rot_angles), axis=0)
-            self.mask = radial_profil(self.coro * torch.Tensor(self.mask), self.F_rp)
-            self.r2 = torch.linspace(0, len(self.mask), len(self.mask)) ** 2
-            self.regul2 = lambda X, L, M, amp: tsum((amp * M - radial_profil(self.coro * torch.mean(
-                self.model.get_Lf(L, rot=True), dim=0)[0], self.F_rp)) ** 2)
-
-        else:
-            raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
-
-        R2_name = mode + " on " + penaliz
-        R2_name += " inverted" if invert else ""
-        self.config[1] = R2_name
-
-        if save and mode != "l1":
-            if not isdir(self.savedir): makedirs(self.savedir)
-            write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
-
-    def estimate_halos(self, full_output=False, save=False):
-        self.halos = []
-        self.halos_2 = []
-        self.halos_nmsk = []
-
-        i_nb = 0
-
-        # Compute ambiguities invariant to the rotation
-        science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-        static = np.median(science_data_derot_np, axis=0)
-        rotate = np.median(self.science_data, axis=0)
-        ambig = np.min(np.array([static, rotate]), axis=0).clip(0)
-        write_fits(self.savedir + "/ambig", ambig * self.coro.numpy())
-        tmp_halo = Gauss_2D(ambig, mask=1)
-        self.halos_2 = tmp_halo.Hinit.numpy()
-        self.halos = tmp_halo.generate().numpy()
-
-        self.no_halo = self.science_data - self.halos
-        self.no_halo_2 = self.science_data - self.halos_2
-
-        if isinstance(save, str): self.savedir = save
-        if not isdir(self.savedir): makedirs(self.savedir)
-        write_fits(self.savedir + "/cube_no_halo", self.no_halo * self.coro.numpy())
-        self.no_halo_2 = self.no_halo_2 + abs(np.min(self.no_halo_2)) - abs(np.min(static))
-        write_fits(self.savedir + "/cube_no_halo_init", self.no_halo_2 * self.coro.numpy())
-        write_fits(self.savedir + "/halos_est", self.halos * self.coro.numpy())
-        write_fits(self.savedir + "/halos_init", self.halos_2 * self.coro.numpy())
-
-        if False:
-            try:
-                for frame in self.science_data:
-                    print("Frame N°" + str(i_nb))
-                    tmp_halo = Gauss_2D(frame, mask=1)
-                    self.halos.append(tmp_halo.generate().numpy())
-                    self.halos_2.append(tmp_halo.Hinit.numpy())
-                    self.halos_nmsk.append(tmp_halo.Hinit_no_mask.numpy())
-                    i_nb += 1
-                self.halos = np.array(self.halos)
-                self.halos_2 = np.array(self.halos_2)
-                self.halos_nmsk = np.array(self.halos_nmsk)
-            except KeyboardInterrupt:
-                print("Process end by user.. save halos from frame 1 to " + str(i_nb))
-
-            if full_output:
-                self.no_halo = self.science_data - self.halos
-                self.no_halo = self.no_halo - np.min(self.no_halo)
-
-                self.no_halo_2 = self.science_data - self.halos_2
-                self.no_halo_2 = self.no_halo_2 - np.min(self.no_halo_2)
-
-                self.no_halo_no_mask = self.science_data - self.halos_nmsk
-                self.no_halo_no_mask = self.no_halo_no_mask - np.min(self.no_halo_no_mask)
-
-                if isinstance(save, str): self.savedir = save
-                if not isdir(self.savedir): makedirs(self.savedir)
-                write_fits(self.savedir + "/cube_no_halo", self.no_halo * self.coro.numpy())
-                write_fits(self.savedir + "/cube_no_halo_init", self.no_halo_2 * self.coro.numpy())
-                write_fits(self.savedir + "/cube_no_halos_nmsk", self.no_halo_no_mask * self.coro.numpy())
-                write_fits(self.savedir + "/halos_est", self.halos * self.coro.numpy())
-                write_fits(self.savedir + "/halos_init", self.halos_2 * self.coro.numpy())
-
-        self.science_data = self.no_halo
 
     def estimate(self, w_r=0.03, w_r2=0.03, w_r3=0.01, w_pcent=True, estimI="Both", med_sub=False, weighted_rot=True,
                  w_way=(0, 1), maxiter=10, gtol=1e-10, kactiv=0, kdactiv=None, save="./", suffix='', gif=False,
@@ -579,23 +325,22 @@ class mustard_estimator:
 
         # Keep track on history
         mink = 2  # Min number of iter before convergence
-        loss_evo = [];
-        grad_evo = []
-
+        loss_evo = []
+        
         # Regularization activation init setting
-        if kactiv == "converg": kactiv = maxiter  # If option converge, kactiv start when miniz end
+        if kactiv == "converg": kactiv = maxiter  # If option converge, kactiv start when reach convergence.
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
         w_r = w_r if w_r else 0;
         w_r2 = w_r2 if w_r2 else 0;
-        w_r3 = w_r3 if w_r3 else 0  # If None/0/False, it will be set to 0
-        w_rp = np.array([w_r, w_r2]) if w_pcent else np.array([0, 0])  # Percent w, to be computed later
+        w_r3 = w_r3 if w_r3 else 0
+        w_rp = np.array([w_r, w_r2, w_r3]) if w_pcent else np.array([0, 0, 0])  # Percent w, to be computed later
 
-        # Compute weights for small angles bias
-        if isinstance(self.model, mustard.model.model_ADI) and weighted_rot:
+        # Compute frame weights for small angles bias
+        if isinstance(self.model, model_ADI) and weighted_rot:
             self.config[3] = "with"
             ang_weight = compute_rot_weight(self.model.rot_angles)
             self.ang_weight = torch.from_numpy(ang_weight.reshape((self.nb_frame, 1, 1, 1))).double().to(self.device)
-        elif isinstance(self.model, mustard.model.model_ASDI):
+        elif isinstance(self.model, model_ASDI):
             if weighted_rot:
                 self.config[3] = "with"
                 ang_weight = compute_rot_weight(self.model.rot_angles)
@@ -607,10 +352,12 @@ class mustard_estimator:
         elif self.ang_weight is None:
             self.ang_weight = torch.from_numpy(np.ones((self.nb_frame, 1, 1, 1))).double().to(self.device)
 
+        # When pixels by their variances. Can be shut down.
         temporal_var = np.var(self.science_data, axis=0)
         temporal_var *= 1 / np.max(temporal_var)
         self.var_pond = 1  # torch.unsqueeze(torch.from_numpy(1 / temporal_var), 0).double().to(self.device)
 
+        # Combine static masks/weights into one signle weight mask.
         self.weight = self.coro * self.var_pond * self.ang_weight
 
         # ______________________________________
@@ -626,14 +373,10 @@ class mustard_estimator:
 
         bkg = np.median(np.mean(self.science_data, axis=0)[np.where(1 - circle(self.shape, self.ref_mask_siz[1]))])
 
-        if isinstance(self.model, mustard.model.model_ASDI):
+        if isinstance(self.model, model_ASDI):
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 2).double().to(self.device)
         else:
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
-
-        # med = torch.median(self.coro * science_data, dim=0, keepdim=True).values
-        # med = np.median(abs(self.science_data))
-        # med = 0
 
         # __________________________________
         # Initialisation with max common
@@ -645,7 +388,7 @@ class mustard_estimator:
             L0, X0 = self.L0x0[0], self.L0x0[1]
         else:
             # TODO : sceince_data_derot means derotated (if ADI) or descale (if SDI) or both (if ASDI) consider refactor
-            if isinstance(self.model, mustard.model.model_ADI):
+            if isinstance(self.model, model_ADI):
 
                 if verbose: print("Mode ADI : Max common init in progress... ")
 
@@ -688,7 +431,7 @@ class mustard_estimator:
                 self.L0x0 = L0, X0
                 del res_R, res_L, med_R, med_L
 
-            if isinstance(self.model, mustard.model.model_ASDI):
+            if isinstance(self.model, model_ASDI):
                 if verbose: print("Mode ASDI : Max common init in progress... ")
                 science_data_derot_np = np.ndarray(self.science_data.shape)
                 for channel in range(self.model.nb_sframe):
@@ -732,7 +475,7 @@ class mustard_estimator:
                 science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double().to(
                     self.device)
 
-                if isinstance(self.model, mustard.model.model_SDI):
+                if isinstance(self.model, model_SDI):
                     if verbose: print("Mode SDI : Max common init in progress... ")
                     science_data_derot_np, res, _, _, _, _ = cube_rescaling_wavelengths(self.science_data,
                                                                                         self.model.scales,
@@ -795,27 +538,22 @@ class mustard_estimator:
             loss0 = w_way[0] * torch.sum(self.weight * (Y0 - science_data) ** 2) + \
                     w_way[1] * torch.sum(self.weight * (Y0_reverse - science_data_derot) ** 2)
 
-            # loss0 = torch.sum(self.weight * (1 - (Y0 / science_data))**2)
-
             if w_pcent and Ractiv:  # Auto hyperparameters
-                reg1 = self.regul(X0, L0)
+                reg1 = self.regul1(X0, L0)
                 w_r = w_rp[0] * loss0 / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                reg3 = self.regul3(X0, L0)
-                w_r3 = w_rp[0] * loss0 / reg1 if w_rp[0] and reg1 > 0 else 0
-
                 reg2 = self.regul2(X0, L0, self.mask, ref_amp_k)
-                # w_r2 = w_rp[1] * loss0 / reg2 if w_rp[1] and reg2 > 0 else 0
+                w_r2 = w_rp[1] * loss0 / reg2 if w_rp[1] and reg2 > 0 else 0
+                
+                reg3 = self.regul3(X0, L0)
+                w_r3 = w_rp[2] * loss0 / reg3 if w_rp[0] and reg3 > 0 else 0
 
                 if (w_rp[0] and reg1 < 0) or (w_rp[1] and reg2 < 0):
                     if verbose: print("Impossible to compute regularization weight. "
                                       "Activation is set to iteration n°2. ")
                     kactiv = 2
 
-            reg2 = self.regul2(X0, L0, self.mask, ref_amp_0)
-            w_r2 = w_rp[1] * loss0 / reg2 if w_rp[1] and reg2 > 0 else 0
-
-            R1_0 =  w_r * self.regul(X0, L0) if w_r * Ractiv else 0
+            R1_0 =  w_r * self.regul1(X0, L0) if w_r * Ractiv else 0
             R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask, ref_amp_0)
             R3_0 = w_r3 * self.regul3(X0, L0) if w_r * Ractiv else 0
 
@@ -846,7 +584,7 @@ class mustard_estimator:
             Yk_reverse = self.model.forward_ADI_reverse(Lk, Xk, flux_k, fluxR_k) if w_way[1] else 0
 
             # Compute regularization(s)
-            R1 =  w_r * self.regul(Xk, Lk) if Ractiv * w_r else 0
+            R1 = Ractiv * w_r  * self.regul1(Xk, Lk) if Ractiv * w_r else 0
             R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask, ref_amp_k)
             R3 = Ractiv * w_r3 * self.regul3(Xk, Lk) if Ractiv * w_r else 0
 
@@ -870,17 +608,17 @@ class mustard_estimator:
 
                 with torch.no_grad():
                     if w_pcent:
-                        reg1 = self.regul(Xk, Lk)
+                        reg1 = self.regul1(Xk, Lk)
                         w_r = w_rp[0] * loss / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                        reg3 = self.regul3(Xk, Lk)
-                        w_r3 = w_rp[0] * loss / reg1 if w_rp[0] and reg1 > 0 else 0
-
                         reg2 = self.regul2(Xk, Lk, self.mask, ref_amp_k)
-                        # w_r2 = w_rp[1] * loss / reg2 if w_rp[1] and reg2 > 0 else 0
+                        w_r2 = w_rp[1] * loss / reg2 if w_rp[1] and reg2 > 0 else 0
+                        
+                        reg3 = self.regul3(Xk, Lk)
+                        w_r3 = w_rp[2] * loss / reg3 if w_rp[0] and reg1 > 0 else 0
 
-                    if (w_rp[0] and reg1 < 0) or (w_rp[1] and reg2 < 0):
-                        if verbose: print("Impossible to compute regularization weight.")
+                    if (w_rp[0] and reg1 < 0) or (w_rp[1] and reg2 < 0) or (w_rp[2] and reg3 < 0):
+                        if verbose: print("Impossible to compute regularization weight. Set to 0")
 
                 # Define the varaible to be estimated.
                 if estimI == "Both":
@@ -1045,6 +783,197 @@ class mustard_estimator:
         else:
             return nice_L_est, nice_X_est
 
+    #### SETTERS / CONFIG ####
+    
+    def set_savedir(self, savedir: str):
+        self.savedir = savedir
+        if not isdir(self.savedir): makedirs(self.savedir)
+
+    def set_init(self, X0=None, L0=None):
+        """
+        Define initialization by yourslef.
+
+        Parameters
+        ----------
+        X0 : numpy.ndarry or None
+            Init of circumstellar map
+        L0 : numpy.ndarry or None
+            Init of speakles map
+
+        """
+        if L0 is None and X0 is None:
+            raise (AssertionError("At least one argument must be provided"))
+            
+        if X0 is None:
+            X0 = np.mean(cube_derotate(self.science_data - L0, self.model.rot_angles), 0)
+        elif L0 is None:
+            L0 = np.mean(self.science_data -
+                         cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
+
+        self.L0x0 = (L0.clip(0), X0.clip(0))
+
+    def configR1(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
+        """ Configuration of first regularization. (smooth-like)"""
+
+        if mode == "smooth_with_edges":
+            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
+                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
+        elif mode == "smooth":
+            self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
+                                    torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+
+        elif mode == "l1":
+            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+
+        self.p_L = p_L
+        self.p_X = p_X
+
+        if smoothL:
+            self.regul1 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
+        else:
+            self.regul1 = lambda X, L: self.smooth(X)
+
+
+    def configR2(self, Msk=None, mode="mask", penaliz="X", invert=False, save=False):
+        """ Configuration for Second regularization.
+        Two possible mode :   R = M*X      (mode 'mask')
+                           or R = dist(M-X) (mode 'dist')
+                           or R = sum(X)   (mode 'l1')
+
+        Parameters
+        ----------
+        save : False
+            Save your mask
+
+        Msk : numpy.array or torch.tensor
+            Prior mask of X.
+
+        mode : {"mask","dist"}.
+            if "mask" :  R = norm(M*X)
+                if M will be normalize to have values from 0 to 1.
+            if "dist" :  R = dist(M-X)
+
+        penaliz : {"X","L","both"}
+            Unknown to penaliz.
+            With mode mask :
+                if "X" : R = norm(M*X)
+                if "L" : R = norm((1-M)*L)
+                if "B" : R = norm(M*X) + norm((1-M)*L)
+            With mode dist :
+                if "X" : R = dist(M-X)
+                if "L" : R = dist(M-L)
+                if "B" : R = dist(M-X) - dist(M-L)
+            With mode l1 :
+                if "X" : R = sum(X)
+                if "L" : R = sum(L)
+                if "B" : R = sum(X) - sum(L)
+
+        invert : Bool
+            Reverse penalize mode bewteen L and X.
+
+        Returns
+        -------
+
+        """
+        if mode == "pdi":
+            Msk = convert_to_mask(Msk)
+            mode = "mask"
+
+        if mode != 'l1':
+            if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
+            if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
+                raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
+
+        if Msk is not None and (mode != 'mask' and mode != 'ref'):
+            warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
+
+        self.F_rp = create_radial_prof_matirx(self.model.frame_shape)  # Radial profil transform
+        # y, x = np.indices(self.model.frame_shape)
+        # self.yx = torch.from_numpy(y), torch.from_numpy(x)
+
+        penaliz = penaliz.capitalize()
+        rM = self.coroR  # corono mask for regul
+        if penaliz not in ("X", "L", "Both", "B"):
+            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
+
+        if mode == "dist":
+            self.mask = Msk
+            sign = -1 if invert else 1
+            if penaliz == "X":
+                self.regul2 = lambda X, L, M: tsum(rM * (M - X) ** 2)
+            elif penaliz == "L":
+                self.regul2 = lambda X, L, M: tsum(rM * (M - L) ** 2)
+            elif penaliz in ("Both", "B"):
+                self.regul2 = lambda X, L, M: sign * (tsum(rM * (M - X) ** 2) -
+                                                      tsum(rM * (M - L) ** 2))
+
+        elif mode == "mask":
+            Msk = Msk / torch.max(Msk)  # Normalize mask
+            self.mask = (1 - Msk) if invert else Msk
+            if penaliz == "X":
+                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2)
+            elif penaliz == "L":
+                self.regul2 = lambda X, L, M, amp: tsum(rM * ((1 - M) * L) ** 2)
+            elif penaliz in ("Both", "B"):
+                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2) + \
+                                                   tsum(rM * M) ** 2 / tsum(rM * (1 - M)) ** 2 * \
+                                                   tsum(rM * ((1 - M) * L) ** 2) + \
+                                                   res_non_convexe(radial_profil(L, self.F_rp))
+
+        elif mode == "l1":
+            sign = -1 if invert else 1
+            if penaliz == "X":
+                self.regul2 = lambda X, L, M: tsum(X ** 2)
+            elif penaliz == "L":
+                self.regul2 = lambda X, L, M: tsum(L ** 2)
+            elif penaliz in ("Both", "B"):
+                self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
+
+        elif mode == "ref":
+            self.mask = np.mean(cube_derotate(np.tile(Msk, (self.nb_frame, 1, 1)), self.model.rot_angles), axis=0)
+            self.mask = radial_profil(self.coro * torch.Tensor(self.mask), self.F_rp)
+            self.r2 = torch.linspace(0, len(self.mask), len(self.mask)) ** 2
+            self.regul2 = lambda X, L, M, amp: tsum((amp * M - radial_profil(self.coro * torch.mean(
+                self.model.get_Lf(L, rot=True), dim=0)[0], self.F_rp)) ** 2)
+
+        else:
+            raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
+
+        R2_name = mode + " on " + penaliz
+        R2_name += " inverted" if invert else ""
+        self.config[1] = R2_name
+
+        if save and mode != "l1":
+            if not isdir(self.savedir): makedirs(self.savedir)
+            write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
+
+        def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
+                """ Configuration of first regularization. (smooth-like)"""
+        
+                if mode == "smooth_with_edges":
+                    self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
+                                            torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
+                elif mode == "smooth":
+                    self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
+                                            torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+        
+                elif mode == "l1":
+                    self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+        
+                else:
+                    self.smooth = lambda X: 0
+        
+                self.p_L = p_L
+                self.p_X = p_X
+        
+                if smoothL:
+                    self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
+                else:
+                    self.regul3 = lambda X, L: self.smooth(X)
+
+    
+    #### GETTERS / PLOTS ####
+
     def get_science_data(self):
         """Return input cube and angles"""
         return self.model.rot_angles, self.science_data
@@ -1172,99 +1101,7 @@ class mustard_estimator:
             plt.savefig(self.savedir + "/PA_frame_weight_" + self.name)
 
         return weight
-
-    def mustard_results(self, per_vmax=99, r_no_scale=False):
-        """Return loss evolution"""
-
-        L, X = self.res["x_no_r"]
-        cube = self.science_data
-        ang = self.model.rot_angles
-
-        noise = self.coro.numpy() * self.get_residual()
-        flx, flxR = self.get_flux(show=False)
-        flx = [1] + list(flx)
-        flxR = [1] + list(flxR)
-
-        font = {'color': 'white',
-                'weight': 'bold',
-                'size': 16,
-                }
-
-        vmax = np.percentile(cube, per_vmax)
-        vmin = cube.min()
-
-        Rvmax = np.percentile(X, per_vmax) if r_no_scale else vmax
-
-        def plot_framek(val: int, show=True) -> None:
-
-            num = int(val)
-            font["size"] = 26
-            font["color"] = "white"
-
-            plt.subplot(1, 2, 1)
-            plt.imshow(self.coro.numpy() * cube[num], vmax=vmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "ADI cube", font)
-            plt.title("Frame n°" + str(num))
-            font["size"] = 22
-            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flx[num]), font)
-
-            font["size"] = 22
-            plt.subplot(2, 2, 4)
-            plt.imshow(self.final_mask * flx[num] * frame_rotate(X, ang[num]), vmax=Rvmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "Rotate", font)
-
-            font["size"] = 16
-            plt.subplot(2, 4, 4)
-            plt.imshow(self.final_mask * flxR[num] * flx[num] * L, vmax=vmax, vmin=vmin, cmap='jet')
-            plt.text(20, 40, "Static", font)
-            font["size"] = 12
-            plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
-
-            font["size"] = 16
-            font["color"] = "red"
-
-            plt.subplot(2, 4, 3)
-            plt.imshow(noise[num], cmap='jet')
-            plt.clim(-np.percentile(noise[num], 98), +np.percentile(noise[num], 98))
-            plt.text(20, 40, "Random", font)
-            if show: plt.show()
-
-        # ax_slid = plt.axes([0.1, 0.25, 0.0225, 0.63])
-        # handler = Slider(ax=ax_slid, label="Frame", valmin=0, valmax=len(cube), valinit=0, orientation="vertical")
-        # handler.on_changed(plot_framek)
-
-        plt.ioff()
-        plt.figure("TMP_MUSTARD", figsize=(16, 14))
-        if not isdir(self.savedir): makedirs(self.savedir)
-        if not isdir(self.savedir + "/tmp/"): makedirs(self.savedir + "/tmp/")
-
-        images = []
-        for num in range(len(cube)):
-            plt.cla();
-            plt.clf()
-            plot_framek(num, show=False)
-            plt.savefig(self.savedir + "/tmp/noise_" + str(num) + ".png")
-
-        for num in range(len(cube)):
-            images.append(Image.open(self.savedir + "/tmp/noise_" + str(num) + ".png"))
-
-        for num in range(len(cube)):
-            try:
-                remove(self.savedir + "/tmp/noise_" + str(num) + ".png")
-            except Exception as e:
-                print("[WARNING] Failed to delete iter .png : " + str(e))
-
-        try:
-            rmdir(self.savedir + "/tmp/")
-        except Exception as e:
-            print("[WARNING] Failed to remove iter dir : " + str(e))
-
-        images[0].save(fp=self.savedir + "MUSTARD.gif", format='GIF',
-                       append_images=images, save_all=True, duration=200, loop=0)
-
-        plt.close("TMP_MUSTARD")
-        plt.ion()
-
+   
     def get_radial_prof(self, show=True, save=False):
 
         if show:
@@ -1386,12 +1223,114 @@ class mustard_estimator:
 
         return L0, X0
 
-    def set_savedir(self, savedir: str):
-        self.savedir = savedir
-        if not isdir(self.savedir): makedirs(self.savedir)
+    def mustard_results(self, per_vmax=99, r_no_scale=False):
+       """Return loss evolution"""
+    
+       L, X = self.res["x_no_r"]
+       cube = self.science_data
+       ang = self.model.rot_angles
+    
+       noise = self.coro.numpy() * self.get_residual()
+       flx, flxR = self.get_flux(show=False)
+       flx = [1] + list(flx)
+       flxR = [1] + list(flxR)
+    
+       font = {'color': 'white',
+               'weight': 'bold',
+               'size': 16,
+               }
+    
+       vmax = np.percentile(cube, per_vmax)
+       vmin = cube.min()
+    
+       Rvmax = np.percentile(X, per_vmax) if r_no_scale else vmax
+    
+       def plot_framek(val: int, show=True) -> None:
+    
+           num = int(val)
+           font["size"] = 26
+           font["color"] = "white"
+    
+           plt.subplot(1, 2, 1)
+           plt.imshow(self.coro.numpy() * cube[num], vmax=vmax, vmin=vmin, cmap='jet')
+           plt.text(20, 40, "ADI cube", font)
+           plt.title("Frame n°" + str(num))
+           font["size"] = 22
+           plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flx[num]), font)
+    
+           font["size"] = 22
+           plt.subplot(2, 2, 4)
+           plt.imshow(self.final_mask * flx[num] * frame_rotate(X, ang[num]), vmax=Rvmax, vmin=vmin, cmap='jet')
+           plt.text(20, 40, "Rotate", font)
+    
+           font["size"] = 16
+           plt.subplot(2, 4, 4)
+           plt.imshow(self.final_mask * flxR[num] * flx[num] * L, vmax=vmax, vmin=vmin, cmap='jet')
+           plt.text(20, 40, "Static", font)
+           font["size"] = 12
+           plt.text(20, 55, r'$\Delta$ Flux : 1{:+.2e}'.format(1 - flxR[num]), font)
+    
+           font["size"] = 16
+           font["color"] = "red"
+    
+           plt.subplot(2, 4, 3)
+           plt.imshow(noise[num], cmap='jet')
+           plt.clim(-np.percentile(noise[num], 98), +np.percentile(noise[num], 98))
+           plt.text(20, 40, "Random", font)
+           if show: plt.show()
+    
+       # ax_slid = plt.axes([0.1, 0.25, 0.0225, 0.63])
+       # handler = Slider(ax=ax_slid, label="Frame", valmin=0, valmax=len(cube), valinit=0, orientation="vertical")
+       # handler.on_changed(plot_framek)
+    
+       plt.ioff()
+       plt.figure("TMP_MUSTARD", figsize=(16, 14))
+       if not isdir(self.savedir): makedirs(self.savedir)
+       if not isdir(self.savedir + "/tmp/"): makedirs(self.savedir + "/tmp/")
+    
+       images = []
+       for num in range(len(cube)):
+           plt.cla();
+           plt.clf()
+           plot_framek(num, show=False)
+           plt.savefig(self.savedir + "/tmp/noise_" + str(num) + ".png")
+    
+       for num in range(len(cube)):
+           images.append(Image.open(self.savedir + "/tmp/noise_" + str(num) + ".png"))
+    
+       for num in range(len(cube)):
+           try:
+               remove(self.savedir + "/tmp/noise_" + str(num) + ".png")
+           except Exception as e:
+               print("[WARNING] Failed to delete iter .png : " + str(e))
+    
+       try:
+           rmdir(self.savedir + "/tmp/")
+       except Exception as e:
+           print("[WARNING] Failed to remove iter dir : " + str(e))
+    
+       images[0].save(fp=self.savedir + "MUSTARD.gif", format='GIF',
+                      append_images=images, save_all=True, duration=200, loop=0)
+    
+       plt.close("TMP_MUSTARD")
+       plt.ion()
 
+# %% -----Small util function ----------------------------------------------------
+# Could be moved to utils / algos module...
 
-# %% ------------------------------------------------------------------------
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return array[idx]
+
+            
+def cube_rotate(cube, angles):
+    new_cube = torch.zeros(cube.shape)
+    for ii in range(len(angles)):
+        new_cube[ii] = rotate(torch.unsqueeze(cube[ii], 0), float(angles[ii]),
+                              InterpolationMode.BILINEAR)[0]
+    return new_cube
+
 def normlizangle(angles: np.array) -> np.array:
     """Normaliz an angle between 0 and 360"""
 
@@ -1399,7 +1338,6 @@ def normlizangle(angles: np.array) -> np.array:
     angles = angles % 360
 
     return angles
-
 
 def compute_rot_weight(angs: np.array) -> np.array:
     nb_frm = len(angs)
