@@ -53,6 +53,11 @@ class Cube_model():
         # Coro mask
         self.coro = torch.unsqueeze(torch.from_numpy(coro), 0)
 
+    def init_input_estimate(self, Y):
+        # If I was a good programmer I would have writen the assertions to prevent bugs here..
+        # I'll do it later maybe
+        return None
+
     def forward(self):
         # If I was a good programmer I would have writen the assertions to prevent bugs here..
         # I'll do it later maybe
@@ -112,6 +117,9 @@ class model_ADI(Cube_model):
             Y[frame_id] = ReLU(flux[frame_id - 1] * (fluxR[frame_id - 1] * ReLU(RL) + ReLU(x)))
 
         return Y
+
+    def init_input_estimate(self, Y):
+        return 
 
     def get_Lf(self, L: torch.Tensor, flux=None, fluxR=None, rot=False) -> torch.Tensor:
 

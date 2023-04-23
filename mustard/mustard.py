@@ -254,12 +254,7 @@ class mustard_estimator:
         w_r2 : float
             Weight regularization, hyperparameter to control R2 regularization (mask regul)
 
-        w_pcent : bool
-            Determine if regularization weight are raw value or percentage
-            Pecentage a computed based on either the initaial values of L and X with PCA
-            If kactive is set, compute the value based on the L and X at activation.
-
-        estimI : str
+        estimI : str (beta)
             If "None" : normal minimization
             if "L" : With estimate a flux variation of the speakles map
             if "Frame" : With estimate a flux variation between each frame
@@ -268,9 +263,8 @@ class mustard_estimator:
         med_sub : bool
             If True, will proceed to a median subtraction (recommended)
 
-        weighted_rot : bool
+        weighted_rot : bool (beta)
             if True, each frame will be weighted by the delta of rotation.
-            see neo-mayo technical details to know more.
 
         w_way : tuple ints
             If (1,0) : ADI model constructed with the cube and rotate R (direct way)
@@ -284,10 +278,9 @@ class mustard_estimator:
             Gradient tolerance; Set the break point of minimization.
             The break point is define as abs(J_n - J-(n-1)) < gtol
 
-        kactiv : int or {"converg"}
-            Activate regularization at a specific iteration
-            If set to "converg", will be activated when break point is reach
-            Equivalent to re-run a minimization with regul and L and X initialized at converged value
+        kactiv : int
+            Activate regularization at a specific iteration.
+            Allow to be more accurate on the regul/data-attachment term ratio
 
         kdactiv : int or {"converg"}
             Deactivate regularization at a specific iteration
@@ -328,7 +321,6 @@ class mustard_estimator:
         loss_evo = []
         
         # Regularization activation init setting
-        if kactiv == "converg": kactiv = maxiter  # If option converge, kactiv start when reach convergence.
         Ractiv = 0 if kactiv else 1  # Ractiv : regulazation is curently activated or not
         w_r = w_r if w_r else 0;
         w_r2 = w_r2 if w_r2 else 0;
@@ -370,8 +362,6 @@ class mustard_estimator:
                 self.ref_mask_siz = mask_L
             else:
                 raise "mask_L should be an object that contain two int"
-
-        bkg = np.median(np.mean(self.science_data, axis=0)[np.where(1 - circle(self.shape, self.ref_mask_siz[1]))])
 
         if isinstance(self.model, model_ASDI):
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 2).double().to(self.device)
@@ -529,7 +519,7 @@ class mustard_estimator:
         Lk.requires_grad = True
         Xk.requires_grad = True
 
-        # Model and loss at step 0
+        # Loss and regularization at initialization 
         with torch.no_grad():
 
             Y0 = self.model.forward(L0, X0, flux_0, fluxR_0) if w_way[0] else 0
@@ -558,7 +548,8 @@ class mustard_estimator:
             R3_0 = w_r3 * self.regul3(X0, L0) if w_r * Ractiv else 0
 
             loss0 += (R1_0 + R2_0 + R3_0)
-
+        
+        # Init  minimization terms
         loss, R1, R2, R3 = loss0, R1_0, R2_0, R3_0
 
         # Starting minization soon ...
@@ -574,7 +565,7 @@ class mustard_estimator:
             nonlocal R1, R2, R3, loss, w_r, w_r2, w_r3, Lk, Xk, flux_k, fluxR_k, ref_amp_k
             optimizer.zero_grad()  # Reset gradients
 
-            # Background flux managment
+            # Background flux managment (beta)
             # bkg = self.compute_bkg(Xk[0])
             # with torch.no_grad() : Xk = Xk*self.coro
             # Lkb = Lk + bkg
@@ -585,15 +576,13 @@ class mustard_estimator:
 
             # Compute regularization(s)
             R1 = Ractiv * w_r  * self.regul1(Xk, Lk) if Ractiv * w_r else 0
-            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask, ref_amp_k)
-            R3 = Ractiv * w_r3 * self.regul3(Xk, Lk) if Ractiv * w_r else 0
+            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask, ref_amp_k) if Ractiv * w_r2 else 0
+            R3 = Ractiv * w_r3 * self.regul3(Xk, Lk) if Ractiv * w_r3 else 0
 
             # Compute loss and local gradients
             loss = w_way[0] * torch.sum(self.weight * (Yk - science_data) ** 2) + \
                    w_way[1] * torch.sum(self.weight * (Yk_reverse - science_data_derot) ** 2) + \
                    (R1 + R2 + R3)
-
-            # loss = torch.sum( self.weight * (1 - ( Yk / science_data))**2) + (R1 + R2 + R3)
 
             loss.backward()
             return loss
@@ -704,9 +693,9 @@ class mustard_estimator:
                 if k == 1: self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
 
                 # Break point (based on gtol)
-                grad = torch.mean(abs(Xk.grad.data)) if not estimI == "Justl" else torch.mean(abs(Lk.grad.data))
-                # grad_evo.append(grad)
-                if k > mink and  (grad < gtol) :  # or loss == loss_evo[-1] ):
+                grad = abs(loss[-1] - loss_evo[-2])
+                
+                if k > mink and  (grad < gtol) :
                     if not Ractiv and kactiv:  # If regul haven't been activated yet, continue with regul
                         Ractiv = 1;
                         mink = k + 2;
@@ -724,13 +713,14 @@ class mustard_estimator:
         except KeyboardInterrupt:
             ending = "keyboard interruption"
 
+
+        # ______________________________________
+        # Done, store and unwrap results back to numpy array!
+
         process_to_prints(last=True)
         end_msg = "Done (" + ending + ") - Running time : " + str(datetime.now() - start_time)
         if verbose: print(end_msg)
         txt_msg += "\n\n" + end_msg
-
-        # ______________________________________
-        # Done, store and unwrap results back to numpy array!
 
         if k > 1 and (torch.isnan(loss) or loss > loss_evo[-2]) and self.final_estim is not None:
             L_est = abs(self.final_estim[0].detach().numpy()[0])
@@ -743,6 +733,7 @@ class mustard_estimator:
         amp_ref = abs(ref_amp_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
 
+        # Remove bkg flux from bkg_pup. (beta)
         bkg = 0  # np.median(X_est[np.where(self.pup_bkg==1)])
 
         nice_L_est = self.coro.numpy() * (L_est + bkg).clip(min=0)
