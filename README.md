@@ -28,28 +28,29 @@ Install dependencies
 
 ## Usage/Exemple
 
-Follow instruction in the demo to test the algorithm with your own datasets.
+1. Follow instruction in the demo to test the algorithm with your own datasets.
 [Pyhton file](demo.py)
 
-Produce the cool gif presented [above](#Screenshots) with PSD-70 dataset (03/2019, program 1100.C-0481(L), K2-band)
-[How to use MUSTARD](doc/demo.html)
-[Source jupyter Notebook](demo.ipynb)
+2. [Produce the cool gif](doc/demo.html) presented with PSD-70 dataset (03/2019, program 1100.C-0481(L), K2-band)
 
-Use [documentation](#Documentation) to known more about configration.
+3. Further information available in [documentation](#Documentation) 
 
 ## Related
 
 Also check out other package for Exoplanet/disk direct imaging
 
--[GreeDS - I-PCA algorithm (Iterative Principal Component Analysis)](https://github.com/Sand-jrd/GreeDS)
+- [GreeDS - I-PCA algorithm (Iterative Principal Component Analysis)](https://github.com/Sand-jrd/GreeDS)
+
 Refactored implementation of the original code from [Pairet et al](https://arxiv.org/pdf/2008.05170.pdf)
 
 - [VIP - Vortex Image Processing package](https://github.com/vortex-exoplanet/VIP)
+
 Tools for high-contrast imaging of exoplanets and circumstellar disks.
 
 ## Documentation
 
 - [Auto-generated user guide](doc/index.html)
+
 - [How to use MUSTARD](doc/demo.html)
 
 - [Doc about the maths behind the algorithm](https://docs.google.com/presentation/d/1aPjWJUztfjROtt8BPi8uh6X-vBD5dc81wQ1MhMGGOas/edit) 
