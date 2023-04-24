@@ -1,0 +1,673 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>MUSTRDA documentation &#8212; mustard 1.0 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <link rel="stylesheet" type="text/css" href="_static/nbsphinx-code-cells.css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/x-mathjax-config">MathJax.Hub.Config({"tex2jax": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "ignoreClass": "tex2jax_ignore|mathjax_ignore|document", "processClass": "tex2jax_process|mathjax_process|math|output_area"}})</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="mustrda-documentation">
+<h1>MUSTRDA documentation<a class="headerlink" href="#mustrda-documentation" title="Permalink to this headline">¶</a></h1>
+<p>This package is a ADI sequence processing tool that aim to distangle part of the sequence thats is startics (quasi-static speakels), decorelated signal (fast variating outliers and uncorrected by AO and noise) and the signal that is rotating (the signal of interest : Disk and exoplanets)
+&lt;img src=”./example-data/demo.gif” alt=”demo” width=”700” text-align=”center”/&gt;</p>
+<div class="toctree-wrapper compound">
+</div>
+<section id="documentation">
+<h2>Documentation<a class="headerlink" href="#documentation" title="Permalink to this headline">¶</a></h2>
+<dl class="py class">
+<dt id="mustard.mustard_estimator">
+<em class="property">class </em><code class="sig-prename descclassname">mustard.</code><code class="sig-name descname">mustard_estimator</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">science_data</span><span class="p">:</span> <span class="n">numpy.ndarray</span></em>, <em class="sig-param"><span class="n">angles</span><span class="p">:</span> <span class="n">numpy.ndarray</span></em>, <em class="sig-param"><span class="n">scale</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">coro</span><span class="o">=</span><span class="default_value">6</span></em>, <em class="sig-param"><span class="n">pupil</span><span class="o">=</span><span class="default_value">'edge'</span></em>, <em class="sig-param"><span class="n">psf</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">hid_mask</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">Badframes</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">savedir</span><span class="o">=</span><span class="default_value">'./'</span></em>, <em class="sig-param"><span class="n">ref</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator" title="Permalink to this definition">¶</a></dt>
+<dd><p>MUSTARD Algorithm main class</p>
+<p class="rubric">Methods</p>
+<table class="longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">compute_bkg</span></code>(X)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.configR1" title="mustard.mustard_estimator.configR1"><code class="xref py py-obj docutils literal notranslate"><span class="pre">configR1</span></code></a>(mode[, smoothL, p_L, p_X, epsi])</p></td>
+<td><p>Configuration of first regularization.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.configR2" title="mustard.mustard_estimator.configR2"><code class="xref py py-obj docutils literal notranslate"><span class="pre">configR2</span></code></a>([Msk, mode, penaliz, invert, save])</p></td>
+<td><p>Configuration for Second regularization.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.configR3" title="mustard.mustard_estimator.configR3"><code class="xref py py-obj docutils literal notranslate"><span class="pre">configR3</span></code></a>(mode[, smoothL, p_L, p_X, epsi])</p></td>
+<td><p>Configuration of first regularization.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.estimate" title="mustard.mustard_estimator.estimate"><code class="xref py py-obj docutils literal notranslate"><span class="pre">estimate</span></code></a>([w_r, w_r2, w_r3, w_pcent, estimI, …])</p></td>
+<td><p>Resole the minimization of probleme neo-mayo</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_cube_without_speckles" title="mustard.mustard_estimator.get_cube_without_speckles"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_cube_without_speckles</span></code></a>([way, save])</p></td>
+<td><p>Return input cube and angles</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_evo_convergence" title="mustard.mustard_estimator.get_evo_convergence"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_evo_convergence</span></code></a>([show, save])</p></td>
+<td><p>Return loss evolution</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_flux" title="mustard.mustard_estimator.get_flux"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_flux</span></code></a>([show, save])</p></td>
+<td><p>Return relative flux variations between frame</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_initialisation" title="mustard.mustard_estimator.get_initialisation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_initialisation</span></code></a>([save])</p></td>
+<td><p>Return input cube and angles</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_reconstruction" title="mustard.mustard_estimator.get_reconstruction"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_reconstruction</span></code></a>([way, save])</p></td>
+<td><p>Return input cube and angles</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_residual" title="mustard.mustard_estimator.get_residual"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_residual</span></code></a>([way, save])</p></td>
+<td><p>Return input cube and angles</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_rot_weight" title="mustard.mustard_estimator.get_rot_weight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_rot_weight</span></code></a>([show, save])</p></td>
+<td><p>Return loss evolution</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.get_science_data" title="mustard.mustard_estimator.get_science_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_science_data</span></code></a>()</p></td>
+<td><p>Return input cube and angles</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#mustard.mustard_estimator.mustard_results" title="mustard.mustard_estimator.mustard_results"><code class="xref py py-obj docutils literal notranslate"><span class="pre">mustard_results</span></code></a>([per_vmax, r_no_scale])</p></td>
+<td><p>Return loss evolution</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#mustard.mustard_estimator.set_init" title="mustard.mustard_estimator.set_init"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_init</span></code></a>([X0, L0])</p></td>
+<td><p>Define initialization by yourslef.</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>get_ambiguity</strong></p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p><strong>get_radial_prof</strong></p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p><strong>get_result_unrotated</strong></p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p><strong>get_speckles</strong></p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p><strong>set_savedir</strong></p></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<dl class="py method">
+<dt id="mustard.mustard_estimator.__init__">
+<code class="sig-name descname">__init__</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">science_data</span><span class="p">:</span> <span class="n">numpy.ndarray</span></em>, <em class="sig-param"><span class="n">angles</span><span class="p">:</span> <span class="n">numpy.ndarray</span></em>, <em class="sig-param"><span class="n">scale</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">coro</span><span class="o">=</span><span class="default_value">6</span></em>, <em class="sig-param"><span class="n">pupil</span><span class="o">=</span><span class="default_value">'edge'</span></em>, <em class="sig-param"><span class="n">psf</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">hid_mask</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">Badframes</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">savedir</span><span class="o">=</span><span class="default_value">'./'</span></em>, <em class="sig-param"><span class="n">ref</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.__init__" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialisation of estimator object</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>science_data</strong><span class="classifier">np.ndarray</span></dt><dd><p>ADI cube. The first dimensions should be the number of frames.</p>
+</dd>
+<dt><strong>angles</strong><span class="classifier">np.array</span></dt><dd><p>List of angles. Should be the same size as the ADI cube 1st dimension (number of frames)</p>
+</dd>
+<dt><strong>scale</strong><span class="classifier">np.array or None</span></dt><dd><p>List of scaling coeff for SDI</p>
+</dd>
+<dt><strong>coro</strong><span class="classifier">int or str</span></dt><dd><p>Size of the coronograph</p>
+</dd>
+<dt><strong>pupil</strong><span class="classifier">int or None or “edge”</span></dt><dd><p>Size of the pupil.
+If pupil is set to “edge” : the pupil raduis will be half the size of the frame
+If pupil is set to None : there will be no pupil at all</p>
+</dd>
+<dt><strong>psf</strong><span class="classifier">np.ndarray or None</span></dt><dd><p>If a psf is provided, will perform deconvolution (i.e conv by psf inculded in forward model)</p>
+</dd>
+<dt><strong>Hid_mask: np.array or None</strong></dt><dd><p>Mask to indicate the corrected region.
+Used for coronograph with specific corrected area (i.e : vapp)</p>
+</dd>
+<dt><strong>Badframes</strong><span class="classifier">tuple or list or None</span></dt><dd><p>Bad frames that you will not be taken into account</p>
+</dd>
+<dt><strong>savedir</strong><span class="classifier">str</span></dt><dd><p>Path for outputs</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.configR1">
+<code class="sig-name descname">configR1</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">mode</span><span class="p">:</span> <span class="n">str</span></em>, <em class="sig-param"><span class="n">smoothL</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">p_L</span><span class="o">=</span><span class="default_value">1</span></em>, <em class="sig-param"><span class="n">p_X</span><span class="o">=</span><span class="default_value">1</span></em>, <em class="sig-param"><span class="n">epsi</span><span class="o">=</span><span class="default_value">1e-07</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.configR1" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configuration of first regularization. (smooth-like)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.configR2">
+<code class="sig-name descname">configR2</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">Msk</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">mode</span><span class="o">=</span><span class="default_value">'mask'</span></em>, <em class="sig-param"><span class="n">penaliz</span><span class="o">=</span><span class="default_value">'X'</span></em>, <em class="sig-param"><span class="n">invert</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.configR2" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configuration for Second regularization.
+Two possible mode :   R = M*X      (mode ‘mask’)</p>
+<blockquote>
+<div><p>or R = dist(M-X) (mode ‘dist’)
+or R = sum(X)   (mode ‘l1’)</p>
+</div></blockquote>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>save</strong><span class="classifier">False</span></dt><dd><p>Save your mask</p>
+</dd>
+<dt><strong>Msk</strong><span class="classifier">numpy.array or torch.tensor</span></dt><dd><p>Prior mask of X.</p>
+</dd>
+<dt><strong>mode</strong><span class="classifier">{“mask”,”dist”}.</span></dt><dd><dl class="simple">
+<dt>if “mask”<span class="classifier">R = norm(M*X)</span></dt><dd><p>if M will be normalize to have values from 0 to 1.</p>
+</dd>
+</dl>
+<p>if “dist” :  R = dist(M-X)</p>
+</dd>
+<dt><strong>penaliz</strong><span class="classifier">{“X”,”L”,”both”}</span></dt><dd><p>Unknown to penaliz.
+With mode mask :</p>
+<blockquote>
+<div><p>if “X” : R = norm(M*X)
+if “L” : R = norm((1-M)*L)
+if “B” : R = norm(M*X) + norm((1-M)*L)</p>
+</div></blockquote>
+<dl class="simple">
+<dt>With mode dist :</dt><dd><p>if “X” : R = dist(M-X)
+if “L” : R = dist(M-L)
+if “B” : R = dist(M-X) - dist(M-L)</p>
+</dd>
+<dt>With mode l1 :</dt><dd><p>if “X” : R = sum(X)
+if “L” : R = sum(L)
+if “B” : R = sum(X) - sum(L)</p>
+</dd>
+</dl>
+</dd>
+<dt><strong>invert</strong><span class="classifier">Bool</span></dt><dd><p>Reverse penalize mode bewteen L and X.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.configR3">
+<code class="sig-name descname">configR3</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">mode</span><span class="p">:</span> <span class="n">str</span></em>, <em class="sig-param"><span class="n">smoothL</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">p_L</span><span class="o">=</span><span class="default_value">1</span></em>, <em class="sig-param"><span class="n">p_X</span><span class="o">=</span><span class="default_value">1</span></em>, <em class="sig-param"><span class="n">epsi</span><span class="o">=</span><span class="default_value">1e-07</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.configR3" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configuration of first regularization. (smooth-like)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.estimate">
+<code class="sig-name descname">estimate</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">w_r</span><span class="o">=</span><span class="default_value">0.03</span></em>, <em class="sig-param"><span class="n">w_r2</span><span class="o">=</span><span class="default_value">0.03</span></em>, <em class="sig-param"><span class="n">w_r3</span><span class="o">=</span><span class="default_value">0.01</span></em>, <em class="sig-param"><span class="n">w_pcent</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">estimI</span><span class="o">=</span><span class="default_value">'Both'</span></em>, <em class="sig-param"><span class="n">med_sub</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">weighted_rot</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">w_way</span><span class="o">=</span><span class="default_value">0, 1</span></em>, <em class="sig-param"><span class="n">maxiter</span><span class="o">=</span><span class="default_value">10</span></em>, <em class="sig-param"><span class="n">gtol</span><span class="o">=</span><span class="default_value">1e-10</span></em>, <em class="sig-param"><span class="n">kactiv</span><span class="o">=</span><span class="default_value">0</span></em>, <em class="sig-param"><span class="n">kdactiv</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">'./'</span></em>, <em class="sig-param"><span class="n">suffix</span><span class="o">=</span><span class="default_value">''</span></em>, <em class="sig-param"><span class="n">gif</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">verbose</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">history</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">init_maxL</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">mask_L</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.estimate" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="simple">
+<dt>Resole the minimization of probleme neo-mayo</dt><dd><p>The first step with pca aim to find a good initialisation
+The second step process to the minimization</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>init_maxL: bool</strong></dt><dd><p>if True, all ambiguities will be set to L : stellar halo/speakles map. (no recommended)
+Default is False.</p>
+</dd>
+<dt><strong>w_r</strong><span class="classifier">float</span></dt><dd><p>Weight regularization, hyperparameter to control R1 regularization (smooth regul)</p>
+</dd>
+<dt><strong>w_r2</strong><span class="classifier">float</span></dt><dd><p>Weight regularization, hyperparameter to control R2 regularization (mask regul)</p>
+</dd>
+<dt><strong>estimI</strong><span class="classifier">str (beta)</span></dt><dd><p>If “None” : normal minimization
+if “L” : With estimate a flux variation of the speakles map
+if “Frame” : With estimate a flux variation between each frame
+if “Both” : Will estimate both flux variation between each frame and bewteen frame’s speakles map</p>
+</dd>
+<dt><strong>med_sub</strong><span class="classifier">bool</span></dt><dd><p>If True, will proceed to a median subtraction (recommended)</p>
+</dd>
+<dt><strong>weighted_rot</strong><span class="classifier">bool (beta)</span></dt><dd><p>if True, each frame will be weighted by the delta of rotation.</p>
+</dd>
+<dt><strong>w_way</strong><span class="classifier">tuple ints</span></dt><dd><p>If (1,0) : ADI model constructed with the cube and rotate R (direct way)
+If (0,1) : ADI model constructed with the derotated cube and rotate L (reverse way)
+iI (1,1) : will do both</p>
+</dd>
+<dt><strong>maxiter</strong><span class="classifier">int</span></dt><dd><p>Maximum number of optimization steps</p>
+</dd>
+<dt><strong>gtol</strong><span class="classifier">float</span></dt><dd><p>Gradient tolerance; Set the break point of minimization.
+The break point is define as abs(J_n - J-(n-1)) &lt; gtol</p>
+</dd>
+<dt><strong>kactiv</strong><span class="classifier">int</span></dt><dd><p>Activate regularization at a specific iteration.
+Allow to be more accurate on the regul/data-attachment term ratio</p>
+</dd>
+<dt><strong>kdactiv</strong><span class="classifier">int or {“converg”}</span></dt><dd><p>Deactivate regularization at a specific iteration
+If set to “converg”, will be deactivated when break point is reach
+Equivalent to re-run a minimization with no regul and L and X initialized at converged value</p>
+</dd>
+<dt><strong>save</strong><span class="classifier">str or bool</span></dt><dd><p>If True save at ./mustard_out/
+If path is given, save at the given path + ./mustard_out/</p>
+</dd>
+<dt><strong>suffix</strong><span class="classifier">string</span></dt><dd><p>String suffix to named the simulation outputs</p>
+</dd>
+<dt><strong>gif</strong><span class="classifier">bool</span></dt><dd><p>If path is given, save each the minimization step as a gif</p>
+</dd>
+<dt><strong>verbose</strong><span class="classifier">bool</span></dt><dd><p>Activate or deactivate print</p>
+</dd>
+<dt><strong>history</strong><span class="classifier">bool</span></dt><dd><p>If verbose == True and history == True, information on current iteration will not be overwritten</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>L_est, X_est: ndarray</dt><dd><p>Estimated starlight (L) and circunstlellar (X) contributions</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_cube_without_speckles">
+<code class="sig-name descname">get_cube_without_speckles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">way</span><span class="o">=</span><span class="default_value">'direct'</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_cube_without_speckles" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return input cube and angles</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_evo_convergence">
+<code class="sig-name descname">get_evo_convergence</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">show</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_evo_convergence" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return loss evolution</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_flux">
+<code class="sig-name descname">get_flux</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">show</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_flux" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return relative flux variations between frame</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_initialisation">
+<code class="sig-name descname">get_initialisation</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_initialisation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return input cube and angles</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_reconstruction">
+<code class="sig-name descname">get_reconstruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">way</span><span class="o">=</span><span class="default_value">'direct'</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_reconstruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return input cube and angles</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_residual">
+<code class="sig-name descname">get_residual</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">way</span><span class="o">=</span><span class="default_value">'direct'</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_residual" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return input cube and angles</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_rot_weight">
+<code class="sig-name descname">get_rot_weight</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">show</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">save</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_rot_weight" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return loss evolution</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.get_science_data">
+<code class="sig-name descname">get_science_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.get_science_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return input cube and angles</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.mustard_results">
+<code class="sig-name descname">mustard_results</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">per_vmax</span><span class="o">=</span><span class="default_value">99</span></em>, <em class="sig-param"><span class="n">r_no_scale</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.mustard_results" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return loss evolution</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="mustard.mustard_estimator.set_init">
+<code class="sig-name descname">set_init</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">X0</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">L0</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#mustard.mustard_estimator.set_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Define initialization by yourslef.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>X0</strong><span class="classifier">numpy.ndarry or None</span></dt><dd><p>Init of circumstellar map</p>
+</dd>
+<dt><strong>L0</strong><span class="classifier">numpy.ndarry or None</span></dt><dd><p>Init of speakles map</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>notebooks/demo.ipynb</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="#">mustard</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="#">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2023, Sandrine Juillard.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.1.2</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

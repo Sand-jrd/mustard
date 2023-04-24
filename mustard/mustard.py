@@ -938,29 +938,29 @@ class mustard_estimator:
             if not isdir(self.savedir): makedirs(self.savedir)
             write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
 
-        def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
-                """ Configuration of first regularization. (smooth-like)"""
-        
-                if mode == "smooth_with_edges":
-                    self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
-                                            torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
-                elif mode == "smooth":
-                    self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
-                                            torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
-        
-                elif mode == "l1":
-                    self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
-        
-                else:
-                    self.smooth = lambda X: 0
-        
-                self.p_L = p_L
-                self.p_X = p_X
-        
-                if smoothL:
-                    self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
-                else:
-                    self.regul3 = lambda X, L: self.smooth(X)
+    def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
+            """ Configuration of first regularization. (smooth-like)"""
+    
+            if mode == "smooth_with_edges":
+                self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
+                                        torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
+            elif mode == "smooth":
+                self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
+                                        torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+    
+            elif mode == "l1":
+                self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+    
+            else:
+                self.smooth = lambda X: 0
+    
+            self.p_L = p_L
+            self.p_X = p_X
+    
+            if smoothL:
+                self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
+            else:
+                self.regul3 = lambda X, L: self.smooth(X)
 
     
     #### GETTERS / PLOTS ####
