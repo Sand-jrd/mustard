@@ -41,24 +41,20 @@ Use [documentation](#Documentation) to known more about configration.
 
 Also check out other package for Exoplanet/disk direct imaging
 
-[GreeDS](https://github.com/Sand-jrd/GreeDS)
-I-PCA (Iterative Principal Component Analysis). 
+-[GreeDS - I-PCA algorithm (Iterative Principal Component Analysis)](https://github.com/Sand-jrd/GreeDS)
 Refactored implementation of the original code from [Pairet et al](https://arxiv.org/pdf/2008.05170.pdf)
 
-[VIP - Vortex Image Processing package](https://github.com/vortex-exoplanet/VIP)
+- [VIP - Vortex Image Processing package](https://github.com/vortex-exoplanet/VIP)
 Tools for high-contrast imaging of exoplanets and circumstellar disks.
 
 ## Documentation
 
-Auto-generated user guide
-[Class description](doc/index.html)
-[How to use MUSTARD](doc/demo.html)
+- [Auto-generated user guide](doc/index.html)
+- [How to use MUSTARD](doc/demo.html)
 
-Doc about the maths behind the algorithm
-[Slides](https://docs.google.com/presentation/d/1aPjWJUztfjROtt8BPi8uh6X-vBD5dc81wQ1MhMGGOas/edit) 
+- [Doc about the maths behind the algorithm](https://docs.google.com/presentation/d/1aPjWJUztfjROtt8BPi8uh6X-vBD5dc81wQ1MhMGGOas/edit) 
 
-Doc about package structure
-[Documentation](doc/UMLdocs.png)
+- [Doc about package structure](doc/UMLdocs.png)
 
 
 ## Feedback/Support
