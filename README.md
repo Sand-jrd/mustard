@@ -31,7 +31,7 @@ Install dependencies
 1. Follow instruction in the demo to test the algorithm with your own datasets.
 [Pyhton file](demo.py)
 
-2. [Produce the cool gif](doc/demo.html) presented with PSD-70 dataset (03/2019, program 1100.C-0481(L), K2-band)
+2. [Try with the exemple-data](demo.ipynb) of PSD-70 dataset (03/2019, program 1100.C-0481(L), K2-band)
 
 3. Further information available in [documentation](#Documentation) 
 
