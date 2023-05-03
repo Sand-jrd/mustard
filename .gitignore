@@ -16,6 +16,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+doc/build/
 develop-eggs/
 dist/
 downloads/
@@ -138,3 +139,6 @@ dmypy.json
 *.gif
 iter/
 example-data/
+tests/
+
+demo.*

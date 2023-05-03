@@ -8,17 +8,23 @@ ______________________________
 | Utils Function for mustard  |
 ______________________________
 
+* Function to generate specific patterns matrix
+* Function to plots figures
+* Converte series of matplolib figures into gif
+
+Kind of a dump hall of functions.
 
 @author: sand-jrd
 """
 
 # Misc
-import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
-
-from PIL import Image
 import numpy as np
 import torch
+
+# Plots
+import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+from PIL import Image
 
 # File management
 from vip_hci.fits import open_fits
@@ -27,6 +33,7 @@ from os import mkdir
 from os.path import isdir
 from datetime import datetime
 
+# Font style
 BoxStyle  = {"boxstyle": 'square', "pad": 1.3, "mutation_scale": 0.01, "facecolor": 'indigo', "alpha": 0.65}
 FontStyle = {"family": 'sans', "color": 'beige', "weight": 'normal', "size": 12}
 estimBox  = {"boxstyle": 'square', "facecolor": 'beige', "edgecolor": 'indigo', "alpha": 0.65}
@@ -71,7 +78,6 @@ def circle(shape: tuple, r: float, offset=(0.5, 0.5)):
     if nb_f: M = np.tile(M, (nb_f, 1, 1))
 
     return M
-
 
 def ellipse(shape: tuple, small_ax: float, big_ax: float, rotation: float, off_center=(0, 0)) -> np.ndarray:
     """ Create ellipse of 1 in a 2D matrix of zeros"
@@ -129,35 +135,12 @@ def gaussian(shape, sigma = 1, mu = 0) :
     return abs(np.exp(-((dst - mu) ** 2 / (2.0 * sigma ** 2))))
 
 
-# %% Manage files
-def unpack_science_datadir(datadir: str) -> (torch.Tensor, torch.Tensor):
-    #  Import data
-    json_file = glob.glob(datadir + "/*.json")
 
-    if len(json_file) == 0:
-        raise AssertionError("Json file not found in in data folder : " + str(datadir))
-    elif len(json_file) > 1:
-        raise AssertionError("More than two json file found in data folder : " + str(datadir))
-
-    with open(json_file[0], 'r') as read_data_info:
-        data_info = json.load(read_data_info)
-
-    # Checks if all required keys are here
-    required_keys = ("cube", "angles")
-    if not all([key in data_info.keys() for key in required_keys]):
-        raise AssertionError("Data json info does not contained required keys")
-    ispsf = 'psf' in data_info.keys()
-
-    # Open fits
-    angles = open_fits(datadir + "/" + data_info["angles"], verbose=False)
-    science_data = open_fits(datadir + "/" + data_info["cube"], verbose=False)
-    psf = open_fits(datadir + "/" + data_info["psf"], verbose=False) if ispsf else None
-
-    return angles, science_data, psf
-
+# %% Plot
 
 def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: int, msg_box: str,
                extra_msg: str or None, datadir: str or bool, coro : torch.Tensor(1)) -> None:
+    """ Generate the standard plot of MUSTARD. Evolution at each iteration will be shadow ploted and saved."""
 
     L_np  = abs(L.detach().numpy()[0, :, :])
     X_np  = abs(x.detach().numpy()[0, :, :])
@@ -209,6 +192,8 @@ def print_iter(L: torch.Tensor, x: torch.Tensor, flux: torch.Tensor, bfgs_iter: 
 
 
 def iter_to_gif(save_gif='./', suffix=None) -> None:
+    """ Transforme a series of .png from ./iter/ folfer into a gif."""
+    
     images = []
     plt.ion()
 

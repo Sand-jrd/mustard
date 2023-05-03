@@ -11,10 +11,6 @@ ______________________________
 @author: sand-jrd
 """
 
-from vip_hci.pca import pca_fullfr, pca_annular
-from vip_hci.preproc import cube_derotate
-from vip_hci.preproc import frame_rotate
-from vip_hci.itpca import pca_it
 from vip_hci.var import frame_center
 
 import torch
@@ -22,78 +18,8 @@ from torch.nn.functional import conv2d
 import torch.fft as tf
 
 import numpy as np
-
-
-# %% Initialisation / kind of PCA / PCA iter
-
-def init_estimate(cube: np.ndarray, angle_list: np.ndarray, Imode='max_common', **kwarg) -> (np.ndarray, np.ndarray):
-    """
-    Estimate Satrlight and Circoncstelar light using pca
-
-    Parameters
-    ----------
-    cube : np.ndarray
-        Cube of ADI science data
-
-    angle_list : np.ndarray
-        Rotation angle associated with the ADI cube
-
-    Imode : {'pca',''pcait}
-        mode of pca
-
-    kwarg :
-        Arguments that will be pass to vip function for pca or pcait
-
-    Returns
-    -------
-    L and X : (np.ndarray, np.ndarray)
-        Estimated starlight and circonstelar light
-    """
-
-    L_k = np.zeros(cube.shape)
-    nb_frame = cube.shape[0]
-
-    if Imode == "pca":
-        print("Mode pca")
-        res = pca_fullfr.pca(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "pcait":
-        print("Mode pca iterative")
-        res = pca_it(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "pca_annular":
-        print("Mode pca annular")
-        res = pca_annular(cube, angle_list, verbose=False, **kwarg)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    elif Imode == "max_common":
-        print("Mode maximum in common")
-
-        science_data_derot = cube_derotate(cube, list(angle_list))
-        science_data_derot = science_data_derot
-
-        res = np.min(science_data_derot, 0)
-
-        for frame_id in range(nb_frame):
-            frame_id_rot = frame_rotate(res, angle_list[frame_id])
-            L_k[frame_id] = cube[frame_id] - (frame_id_rot.clip(min=0))
-
-    else : raise ValueError(str(Imode) + " is not a valid mode to init estimator.\nPossible values are {'max_common',"
-                                         "'pca_annular','pca','pcait'}")
-
-    return  np.median(L_k, axis=0).clip(min=0), res.clip(min=0)
-
+from skimage.filters import threshold_multiotsu
+from vip_hci.var import frame_filter_lowpass
 
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
@@ -161,6 +87,7 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
     torch.Tensor
 
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if axis == "y":
         kernel = np.array([[[1, 0, -1],
@@ -172,7 +99,7 @@ def sobel_tensor_conv(tensor: torch.Tensor, axis="y") -> torch.Tensor:
                             [-1, -2, -1]]], dtype='float64')
     else : raise ValueError("'Axis' parameters should be 'x' or 'y', not"+str(axis))
 
-    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double().to(device)
 
     shape = tensor.shape
     filtered = conv2d(tensor.reshape( (1,) + shape), kernel, padding='same')
@@ -197,6 +124,7 @@ def gaussian_tensor_conv(tensor: torch.Tensor, k_size = 5) -> torch.Tensor:
     torch.Tensor
 
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if k_size == 3 :
         kernel = np.array([[[1, 2, 1],
@@ -210,7 +138,7 @@ def gaussian_tensor_conv(tensor: torch.Tensor, k_size = 5) -> torch.Tensor:
                             [1,  4,  6,  4, 1]]], dtype='float64')
     else : raise(ValueError("Kernel size can be {3,5}"))
 
-    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double()
+    kernel = torch.unsqueeze(torch.from_numpy(kernel), 0).double().to(device)
     filtered = conv2d(tensor, kernel, padding='same')
 
     return filtered
@@ -226,12 +154,12 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         large-scale Gibbs artefacts, so make sure no sharp edge is present in
         the image to be rotated.
 
-        /!\ This is a blindly coded adaptation for Tensor of the vip function rotate_fft
+        (!) This is a blindly coded adaptation for Tensor of the vip function rotate_fft
         (https://github.com/vortex-exoplanet/VIP/blob/51e1d734dcdbee1fbd0175aa3d0ab62eec83d5fa/vip_hci/preproc/derotation.py#L507)
 
-        /!\ This suppose the frame is perfectly centred
+        (!) This suppose the frame is perfectly centred
 
-        ! Warning: if input frame has even dimensions, the center of rotation
+        (!) Warning: if input frame has even dimensions, the center of rotation
         will NOT be between the 4 central pixels, instead it will be on the top
         right of those 4 pixels. Make sure your images are centered with
         respect to that pixel before rotation.
@@ -266,7 +194,7 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         dangle = angle
         tensor_in = tensor.clone()
 
-    if y_ori%2 or x_ori%2:
+    if y_ori % 2 or x_ori % 2:
         # NO NEED TO SHIFT BY 0.5px: FFT assumes rot. center on cx+0.5, cy+0.5!
         tensor_in = tensor_in[:, :-1, :-1]
 
@@ -288,7 +216,6 @@ def tensor_rotate_fft(tensor: torch.Tensor, angle: float) -> torch.Tensor:
         array_out = torch.zeros([1, s_xyx.shape[1]+1, s_xyx.shape[2]+1])
         array_out[0, :-1, :-1] = torch.real(s_xyx)
     else:
-        array_out = torch.zeros([1, s_xyx.shape[1], s_xyx.shape[2]])
         array_out = torch.real(s_xyx)
 
     return array_out
@@ -312,6 +239,205 @@ def tensor_fft_shear(arr, arr_ori, c, ax):
     return s_x
 
 
+def tensor_fft_scale(array: torch.Tensor, scale: float, ori_dim=True):
+    """
+    Resample the frames of a cube with a single scale factor using a FFT-based
+    method.
+    Parameters
+    ----------
+    array : 3d tensor
+        Input cube, 3d array.
+    scale : int or float
+        Scale factor for upsampling or downsampling the frames in the cube. If
+        a tuple it corresponds to the scale along x and y.
+    ori_dim: bool, opt
+        Whether to crop/pad scaled array in order to have the output with the
+        same dimensions as the input array. By default, the x,y dimensions of
+        the output are the closest integer to scale*dim_input, with the same
+        parity as the input.
+    Returns
+    -------
+    array_resc : numpy ndarray
+        Output cube with resampled frames.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if scale == 1:
+        return array
+
+
+
+    if array.shape[0] % 2 :
+        odd = True
+        array_even = torch.zeros([array.shape[1] + 1, array.shape[2] + 1])
+        array_even[1:, 1:] = array[0]
+        array = array_even
+    else:
+        array_even = torch.zeros([array.shape[1], array.shape[2]])
+        array_even[:, :] = array[0]
+        array = array_even
+        odd = False
+
+    dim = array.shape[0]  # even square
+    kd_array = torch.arange(dim//2 + 1)
+
+    # scaling factor chosen as *close* as possible to N''/N', where:
+    #   N' = N + 2*KD (N': dim after FT)
+    #   N" = N + 2*KF (N'': dim after FT-1 of FT image),
+    #   => N" = 2*round(N'*sc/2)
+    #   => KF = (N"-N)/2 = round(N'*sc/2 - N/2)
+    #         = round(N/2*(sc-1) + KD*sc)
+    # We call yy=N/2*(sc-1) +KD*sc
+    yy = dim/2 * (scale - 1) + kd_array.double().to(device) * scale
+
+    # We minimize the difference between the `ideal' N" and its closest
+    # integer value by minimizing |yy-int(yy)|.
+    kf_array = torch.round(yy).int()
+    tmp = torch.abs(yy-kf_array)
+    imin = torch.argmin(tmp)  # Nan values not handled
+
+    kd_io = kd_array[imin]
+    kf_io = kf_array[imin]
+
+    # Extract a part of array and place into dim_p array
+    dim_p = int(dim + 2*kd_io)
+    tmp = torch.zeros((dim_p, dim_p)).double().to(device)
+    tmp[kd_io:kd_io+dim, kd_io:kd_io+dim] = array
+
+    # Fourier-transform the larger array
+    array_f = tf.fftshift(tf.fft2(tmp))
+
+    # Extract a part of, or expand, the FT to dim_pp pixels
+    dim_pp = int(dim + 2*kf_io)
+
+    if dim_pp > dim_p:
+        tmp = torch.zeros((dim_pp, dim_pp), dtype=torch.cfloat)
+        tmp[(dim_pp-dim_p)//2:(dim_pp+dim_p)//2,
+            (dim_pp-dim_p)//2:(dim_pp+dim_p)//2] = array_f
+    else:
+        tmp = array_f[kd_io-kf_io:kd_io-kf_io+dim_pp,
+                      kd_io-kf_io:kd_io-kf_io+dim_pp]
+
+    # inverse Fourier-transform the FT
+    tmp = tf.ifft2(tf.fftshift(tmp))
+    array_resc = torch.real(tmp)
+    del tmp
+
+    # Extract a part of or expand the scaled image to desired number of pixels
+    dim_resc = int(round(scale*dim))
+    if dim_resc > dim and dim_resc % 2 != dim % 2:
+        dim_resc += 1
+    elif dim_resc < dim and dim_resc % 2 != dim % 2:
+        dim_resc -= 1  # for reversibility
+
+    if not ori_dim and dim_pp > dim_resc:
+        array_resc = array_resc[(dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2,
+                                (dim_pp-dim_resc)//2:(dim_pp+dim_resc)//2]
+    elif not ori_dim and dim_pp <= dim_resc:
+        array = torch.zeros((dim_resc, dim_resc)).double().to(device)
+        array[(dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2,
+              (dim_resc-dim_pp)//2:(dim_resc+dim_pp)//2] = array_resc
+        array_resc = array
+    elif dim_pp > dim:
+        array_resc = array_resc[kf_io:kf_io+dim, kf_io:kf_io+dim]
+    elif dim_pp <= dim:
+        scaled = array*0
+        scaled[-kf_io:-kf_io+dim_pp, -kf_io:-kf_io+dim_pp] = array_resc
+        array_resc = scaled
+
+    # array_resc /= scale * scale
+
+    if odd:
+        array_tmp = torch.zeros([1, array_resc.shape[0]-1, array_resc.shape[1]-1])
+        array_tmp[0] = array_resc[1:, 1:]
+        array_resc = array_tmp
+    else :
+        array_tmp = torch.zeros([1, array_resc.shape[0], array_resc.shape[1]])
+        array_tmp[0] = array_resc
+        array_resc = array_tmp
+
+    return array_resc
+
+
 def tensor_conv(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    return torch.abs(torch.fft.ifftshift(torch.fft.ifft2(torch.fft.fftshift(torch.fft.fft2(x)) *
-                                                         torch.fft.fftshift(torch.fft.fft2(y)))))
+    return torch.abs(tf.ifftshift(tf.ifft2(tf.fftshift(tf.fft2(x)) * tf.fftshift(tf.fft2(y)))))
+
+
+def convert_to_mask(img: np.ndarray):
+    """ Convert an image into a binary mask
+
+    Parameters
+    ----------
+    img : np.ndarray
+
+    Returns
+    -------
+    mask : np.ndarray
+
+    """
+
+    thresholds = threshold_multiotsu(img)
+    val = thresholds[0]
+    img_m = 1*(img < val)
+    mask = frame_filter_lowpass(img_m)
+
+    return mask
+
+# %% Radial profile
+
+def create_radial_prof_matirx(shape:torch.Tensor, bin_size=1, r2_scale=False) -> torch.Tensor:
+
+    y, x = np.indices(shape)
+    y, x = torch.from_numpy(y), torch.from_numpy(x)
+
+    mid = shape[0] / 2
+    rr = torch.sqrt((x - mid) ** 2 + (y - mid) ** 2)
+
+    rad_max = torch.max(rr)
+
+    nb_anns = torch.floor(rad_max / bin_size).type(torch.IntTensor)
+    rad_prof_transform = torch.ones(shape[0]**2, nb_anns, dtype=torch.double)
+
+    for r in range(nb_anns):
+        ann = (rr < (r * bin_size) + 1) * (rr >= r * bin_size)
+        rad_prof_transform[:, r] *= torch.flatten(ann)/torch.sum(ann)
+        if r2_scale : rad_prof_transform[:, r] *= r**2
+
+    return rad_prof_transform
+
+def radial_profil(M: torch.Tensor, rad_prof_transform: torch.Tensor, norm_bkg=10):
+    """Generate radial profil using transformation matrix. 
+    Use 'create_radial_prof_matirx' to generate rad_prof_transform"""
+    
+    radial_prof = torch.flatten(M) @ rad_prof_transform
+    if norm_bkg : radial_prof -= torch.mean(radial_prof[-norm_bkg:])
+
+    return radial_prof/torch.max(radial_prof)
+
+def res_non_convexe(Rp: torch.Tensor, pup_size=8) -> float :
+    """Sum of positive slope -- can be used as a regualrizator to penalize
+    non-negative slope and enforce a slope that """
+    
+    slope = (Rp[pup_size + 1:] - Rp[pup_size:-1]).clip(min=0)
+
+    return torch.sum(slope)
+
+def radial_profil_bins(M: torch.Tensor, y, x, bin_size=1, norm_bkg=10) -> torch.Tensor:
+    """Generate radial profil. Same operation as 'radial_profil' but do not generate 
+    the tranformation matrix. Not optimal for a ML usage"""
+    
+    mid = M.shape[0] // 2
+    rr = torch.sqrt((x - mid) ** 2 + (y - mid) ** 2)
+
+    means = []
+    rad_max = torch.max(rr)
+
+    nb_anns = torch.floor(rad_max / bin_size).type(torch.IntTensor)
+    for r in range(nb_anns):
+        ann = (rr < (r * bin_size) + 1) * (rr >= r * bin_size)
+        means.append(torch.mean(M[ann]))
+
+    radial_prof = torch.FloatTensor(means)
+    if norm_bkg : radial_prof -= torch.mean(radial_prof[-norm_bkg:])
+
+    return radial_prof
