@@ -1,4 +1,4 @@
-VIP @ git+https://github.com/vortex-exoplanet/VIP@master
+vip-hci @ git+https://github.com/vortex-exoplanet/VIP@master
 torch
 torchvision~=0.11.1
 numpy~=1.21.4
