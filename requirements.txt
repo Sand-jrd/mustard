@@ -2,6 +2,6 @@ vip-hci @ git+https://github.com/vortex-exoplanet/VIP@master
 torch
 torchvision~=0.11.1
 numpy~=1.21.4
-matplotlib~=3.5.0
+matplotlib~=3.4.3
 pillow~=8.4.0
 setuptools~=59.1.1
