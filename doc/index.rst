@@ -16,7 +16,7 @@ Usage
    :maxdepth: 2
    :caption: Contents:
 
-   notebooks/demo
+   ../demo
     
 
 
