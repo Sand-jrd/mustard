@@ -1,0 +1,14 @@
+# .readthedocs.yml
+
+sphinx:
+  configuration: doc/conf.py
+
+build:
+  image: latest
+
+python:
+  version: 3.7
+  setup_py_install: true
+
+# Don't build any extra formats
+formats: []
