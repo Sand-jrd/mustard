@@ -13,8 +13,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath('../..'))
-sys.path.append('/Users/sand-jrd/GitProjects/my_projects/mustard/')
+sys.path.insert(0, os.path.abspath('..'))
 
 # -- Project information -----------------------------------------------------
 
