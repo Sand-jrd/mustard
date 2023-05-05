@@ -4,7 +4,10 @@ sphinx:
   configuration: doc/conf.py
 
 build:
-  image: latest
+  tools:
+    python: "3.8"
+  apt_packages:
+    - python3-openssl
 
 python:
   version: 3.8
