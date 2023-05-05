@@ -11,7 +11,7 @@ This package is a ADI sequence processing tool that aim to distangle part of the
 
 Documentation
 ------------------ 
-.. autoclass:: mustard.mustard_estimator
+.. autoclass:: ..mustard.mustard_estimator
     :members: 
     :special-members: __init__, estimate
 
