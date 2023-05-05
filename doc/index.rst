@@ -7,10 +7,9 @@ You only need to manipulate one class, presented in the section below. A demo is
 
 Documentation
 ------------------ 
-.. autoclass:: mustard.mustard_estimator
+.. autoclass:: mustard.mustard.mustard_estimator
     :members: 
-    :special-members: __init__, estimate
-
+    :special-members: __init__
 Usage
 ------------------ 
 .. toctree::
