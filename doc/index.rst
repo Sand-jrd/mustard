@@ -14,8 +14,7 @@ Usage
 ------------------ 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
-
+   :caption: How to Use MUSTARD
    ../demo
     
 
