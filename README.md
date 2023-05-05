@@ -49,7 +49,7 @@ Tools for high-contrast imaging of exoplanets and circumstellar disks.
 
 ## Documentation
 
-- [Auto-generated user guide](https://sand-jrd.github.io/MUSTARD/)
+- [Auto-generated user guide](https://mustard.readthedocs.io/)
 
 - [How to use MUSTARD](https://sand-jrd.github.io/MUSTARD/demo.html)
 
