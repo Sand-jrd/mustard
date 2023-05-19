@@ -5,7 +5,7 @@ This package is a ADI sequence processing tool that aim to distangle extended si
 
 .. toctree::
     demo.ipynb
-    must_est
+    documentation
 
 Indices and tables
 ==================
