@@ -24,6 +24,18 @@ from vip_hci.var import frame_filter_lowpass
 # %% Operator on tensors
 # Mostly copies of vip functiun adapted to tensors
 
+def pearson_correlation(output, target) -> torch.int32:
+    
+    x = output
+    y = target
+    
+    vx = x - torch.mean(x)
+    vy = y - torch.mean(y)
+    
+    cost = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)))
+    
+    return cost
+
 def laplacian_tensor_conv(tensor: torch.Tensor, kernel_size=3) -> torch.Tensor:
     """
     Apply laplacian filter on input tensor X

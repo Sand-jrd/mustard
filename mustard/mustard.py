@@ -19,7 +19,7 @@ from os.path import isdir
 
 # -- Algo and science model -- #
 from mustard.model import model_ADI, model_ASDI, model_SDI
-from mustard.algo import sobel_tensor_conv, convert_to_mask, radial_profil, res_non_convexe, create_radial_prof_matirx
+from mustard.algo import sobel_tensor_conv, convert_to_mask, radial_profil, res_non_convexe, create_radial_prof_matirx, pearson_correlation
 
 # Numpy operators                          
 from vip_hci.preproc import cube_derotate, frame_rotate,cube_rescaling_wavelengths, cube_crop_frames
@@ -114,7 +114,9 @@ class mustard_estimator:
         """
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # -- Create model and define constants --
+        
+        
+        # -- Create model and define constants -- #
 
         if Badframes is not None:
             science_data = np.delete(science_data, Badframes, 0)
@@ -126,12 +128,7 @@ class mustard_estimator:
         self.mask = 1  # R2 mask default. Will be set if call R2 config
         self.name = ''
         self.savedir = savedir
-
-        # Add refs to cube if refs are provided.
-        if ref is not None :
-            self.nb_ref = ref.shape[0]
-            science_data = np.concatenate((science_data, ref), axis=0)
-        else : self.nb_ref = 0
+        self.shape = science_data.shape[-2:]
         
         # Normalize angles list if provided
         rot_angles = None
@@ -144,35 +141,17 @@ class mustard_estimator:
             # self.ang_shift = find_nearest(rot_angles, np.median(rot_angles))
             # rot_angles -= self.ang_shift
         
-        # ADI / SDI / ASDI modes selcted based on provided angles & scales
-        if scale is not None and angles is not None:
-            # Mode ASDI
-            self.shape = science_data[0, 0].shape
-            self.nb_frame = science_data.shape[0]
-            if science_data.shape[0] != len(angles) or science_data.shape[1] != len(scale):
-                raise "Length of scales does not match the size of the science-data cube !"
-            self.model = model_ASDI(rot_angles, scale, self.coro, psf)
+        # Add refs to cube if refs are provided.
+        if ref is not None :
+            self.nb_ref = ref.shape[0]
+            science_data = np.concatenate((science_data, ref), axis=0)
+            rot_angles   = np.concatenate((rot_angles, np.zeros(self.nb_ref)))
+        else : self.nb_ref = 0
         
-        elif angles is None and scale is None:
-            # User forgot something..
-            raise "List of angles or/and scales are required !"
+        self.science_data = science_data
+        self.angles = rot_angles
         
-        elif scale is not None:
-            # Mode SDI
-           self.shape = science_data[0].shape
-           self.nb_frame = science_data.shape[0]  
-           if self.nb_frame != len(scale) : raise "Length of scales does not match the size of the science-data cube !"
-           self.model = model_SDI(scale, self.coro, psf)
-
-        elif angles is not None:
-            # Mode ADI
-            self.shape = science_data[0].shape
-            self.nb_frame = science_data.shape[0]   
-            if self.nb_frame != len(angles) : raise "Length of angles does not match the size of the science-data cube !"
-            self.model = model_ADI(rot_angles, self.coro, psf)
-
-
-        # Coro and pupil masks
+        # -- Coro and pupil & masks -- #
         pupilR = pupil
         if pupil is None:
             pupil = np.ones(self.shape)
@@ -184,7 +163,7 @@ class mustard_estimator:
             pupilR = circle(self.shape, pupilR - 2)
         else:
             raise ValueError("Invalid pupil key argument. Possible values : {float/int, None, 'edge'}")
-
+        
         # Pup_bgk used to compute background intensity value using the outer annulus of 15 pixels
         self.pup_bkg = circle(self.shape, self.shape[0]/2) - circle(self.shape, self.shape[0]/2-15)
 
@@ -199,13 +178,36 @@ class mustard_estimator:
         if hid_mask is not None:
             self.hid_mask = True
             self.coro = hid_mask
-
         
-        # Will be filled with weight if anf_weight option is activated
-        self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double()
-
         self.coro = torch.from_numpy(self.coro).double().to(self.device)
         self.coroR = torch.from_numpy(self.coroR).double().to(self.device)
+        
+        # -- Type of datats -- #
+        # Mode ASDI
+        if scale is not None and angles is not None: 
+            self.nb_frame = science_data.shape[0]
+            if science_data.shape[0] != len(rot_angles) or science_data.shape[1] != len(scale):
+                raise "Length of scales does not match the size of the science-data cube !"
+            self.model = model_ASDI(rot_angles, scale, self.coro, psf)
+        
+        # Mode "there is a problem"
+        elif angles is None and scale is None: 
+            raise "List of angles or/and scales are required !"
+        
+        # Mode SDI
+        elif scale is not None: 
+           self.nb_frame = science_data.shape[0]  
+           if self.nb_frame != len(scale) : raise "Length of scales does not match the size of the science-data cube !"
+           self.model = model_SDI(scale, self.coro, psf)
+
+        # Mode ADI
+        elif angles is not None: 
+            self.nb_frame = science_data.shape[0]   
+            if self.nb_frame != len(rot_angles) : raise "Length of angles does not match the size of the science-data cube !"
+            self.model = model_ADI(rot_angles, self.coro, psf)
+
+        # --Frames weight option -- #
+        self.ang_weight = torch.from_numpy(np.ones(self.nb_frame).reshape((self.nb_frame, 1, 1, 1))).double()
 
         # -- Configure regularization (can be change later, this is defaults parameters)
         self.config = ["smooth", None, 'No' if psf is None else 'With', 'no', 'Both L and X']
@@ -222,21 +224,305 @@ class mustard_estimator:
         self.last_iter = None; # (X_k, L_k, +option_k)
         self.first_iter = None; # (X_0, L_0, +option_0)
         self.final_estim = None # (X_est, L_est, +option_est)
-        
-        # (todelete)
-        self.ambiguities = None;
-        self.speckles = None; 
-        self.science_data_ori = None  
-        self.pup_bkg_id = torch.tensor(np.array(np.where(self.pup_bkg == 1)), dtype=torch.long)
-        self.science_data[np.where(self.science_data == 0)] = np.finfo(float).eps
 
-    # (todelete)
-    def compute_bkg(self, X):
-        return torch.median(X[self.pup_bkg_id])
+    #### REGULARIZATION CONFIG ####
+
+    def configR1(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
+        """ Configuration of first regularization. (smooth-like)"""
+
+        if mode == "smooth_with_edges":
+            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
+                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
+        elif mode == "smooth":
+            self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
+                                    torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+
+        elif mode == "l1":
+            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+
+        self.p_L = p_L
+        self.p_X = p_X
+
+        if smoothL:
+            self.regul1 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
+        else:
+            self.regul1 = lambda X, L: self.smooth(X)
+
+
+    def configR2(self, Msk=None, mode="mask", penaliz="X", invert=False, save=False):
+        """ Configuration for Second regularization.
+        Two possible mode :   R = M*X      (mode 'mask')
+                           or R = dist(M-X) (mode 'dist')
+                           or R = sum(X)   (mode 'l1')
+
+        Parameters
+        ----------
+        save : False
+            Save your mask
+
+        Msk : numpy.array or torch.tensor
+            Prior mask of X.
+
+        mode : {"mask","dist"}.
+            if "mask" :  R = norm(M*X)
+                if M will be normalize to have values from 0 to 1.
+            if "dist" :  R = pearson(M-X)
+
+        penaliz : {"X","L","both"}
+            Unknown to penaliz.
+            
+            With mode 'mask' (l1 with a mask):
+                if "X" : R = norm(M*X)
+                if "L" : R = norm((1-M)*L)
+                if "B" : R = norm(M*X) + norm((1-M)*L)
+                
+            With mode 'mask' (pearson) :
+                if "X" : R = pearson(M-X)
+                if "L" : R = pearson(M-L)
+                
+            With mode l1 :
+                if "X" : R = sum(X)
+                if "L" : R = sum(L)
+                if "B" : R = sum(X) - sum(L)
+
+        invert : Bool
+            Reverse penalize mode bewteen L and X.
+
+        Returns
+        -------
+
+        """
+        if mode == "pdi":
+            Msk = convert_to_mask(Msk)
+            mode = "mask"
+
+        if mode != 'l1':
+            if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
+            if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
+                raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
+
+        if Msk is not None and (mode != 'mask' and mode != 'ref'):
+            warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
+
+        self.F_rp = create_radial_prof_matirx(self.model.frame_shape)  # Radial profil transform
+        # y, x = np.indices(self.model.frame_shape)
+        # self.yx = torch.from_numpy(y), torch.from_numpy(x)
+
+        penaliz = penaliz.capitalize()
+        rM = self.coroR  # corono mask for regul
+        if penaliz not in ("X", "L", "Both", "B"):
+            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
+
+        if mode == "dist":
+            self.mask = torch.Tensor(Msk)
+            self.regul2 = lambda X, L, M: 1-pearson_correlation(M, L)**2
+
+        elif mode == "mask":
+            Msk = Msk / torch.max(Msk)  # Normalize mask
+            self.mask = (1 - Msk) if invert else Msk
+            if penaliz == "X":
+                self.regul2 = lambda X, L, M: tsum(rM * (M * X) ** 2)
+            elif penaliz == "L":
+                self.regul2 = lambda X, L, M: tsum(rM * ((1 - M) * L) ** 2)
+            elif penaliz in ("Both", "B"):
+                self.regul2 = lambda X, L, M: tsum(rM * (M * X) ** 2) + \
+                                                   tsum(rM * M) ** 2 / tsum(rM * (1 - M)) ** 2 * \
+                                                   tsum(rM * ((1 - M) * L) ** 2) + \
+                                                   res_non_convexe(radial_profil(L, self.F_rp))
+
+        elif mode == "l1":
+            sign = -1 if invert else 1
+            if penaliz == "X":
+                self.regul2 = lambda X, L, M: tsum(X ** 2)
+            elif penaliz == "L":
+                self.regul2 = lambda X, L, M: tsum(L ** 2)
+            elif penaliz in ("Both", "B"):
+                self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
+
+        elif mode == "ref":
+            self.mask = np.mean(cube_derotate(np.tile(Msk, (self.nb_frame, 1, 1)), self.model.rot_angles), axis=0)
+            self.mask = radial_profil(self.coro * torch.Tensor(self.mask), self.F_rp)
+            self.r2 = torch.linspace(0, len(self.mask), len(self.mask)) ** 2
+            self.regul2 = lambda X, L, M: 1-pearson_correlation(M - radial_profil(self.coro * torch.mean(
+                self.model.get_Lf(L, rot=True), dim=0)[0], self.F_rp))** 2
+
+        else:
+            raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
+
+        R2_name = mode + " on " + penaliz
+        R2_name += " inverted" if invert else ""
+        self.config[1] = R2_name
+
+        if save and mode != "l1":
+            if not isdir(self.savedir): makedirs(self.savedir)
+            write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
+
+    def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
+            """ Configuration of first regularization. (smooth-like)"""
+    
+            if mode == "smooth_with_edges":
+                self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
+                                        torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
+            elif mode == "smooth":
+                self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
+                                        torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
+    
+            elif mode == "l1":
+                self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
+    
+            else:
+                self.smooth = lambda X: 0
+    
+            self.p_L = p_L
+            self.p_X = p_X
+    
+            if smoothL:
+                self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
+            else:
+                self.regul3 = lambda X, L: self.smooth(X)
+
+
+    def initatisation(self, init_maxL=False, mask_L=None, save = False):
+        
+        # Med sub
+        if mask_L is not None:
+            if len(mask_L) == 2 and isinstance(mask_L[0], int) and isinstance(mask_L[1], int):
+                self.ref_mask = torch.Tensor(circle(self.shape, mask_L[1]) - circle(self.shape, mask_L[0]))
+                self.ref_mask_siz = mask_L
+            else:
+                raise "mask_L should be an object that contain two int"
+
+        if self.L0x0 is not None:
+            L0, X0 = self.L0x0[0], self.L0x0[1]
+        else:
+            # TODO : sceince_data_derot means derotated (if ADI) or descale (if SDI) or both (if ASDI) consider refactor
+            if isinstance(self.model, model_ADI):
+                if self.nb_ref == 0 :
+                    science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+                    science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double()
+
+                    med_L = np.median(self.science_data, axis=0).clip(min=0)
+                    R_fr = cube_derotate(self.science_data- np.tile(med_L, (self.nb_frame-self.nb_ref, 1, 1)),
+                                        self.model.rot_angles)
+                    res_R = np.mean(R_fr, axis=0).clip(min=0)
+                    del R_fr
+                    # self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+
+                    med_R = np.median(science_data_derot_np, axis=0).clip(min=0)
+                    L_fr = self.science_data - cube_derotate(np.tile(med_R, (self.nb_frame, 1, 1)), self.model.rot_angles)
+                    res_L = np.mean(L_fr, axis=0).clip(min=0)
+                    del L_fr
+                    # self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), res.clip(min=0)
+
+                    if init_maxL:
+                        L0 = med_L.clip(min=0)*(1 - self.ref_mask.numpy()) + res_L*self.ref_mask.numpy()
+                        X0 = med_R*self.ref_mask.numpy() #+ res_R.clip(min=0)*(1 - self.ref_mask.numpy())
+                    else:
+                        L0 = med_L.clip(min=0)*(1 - self.ref_mask.numpy()) #+ res_L*self.ref_mask.numpy()
+                        X0 = res_R.clip(min=0)*(1 - self.ref_mask.numpy()) #+ res_R*self.ref_mask.numpy()
+
+                    L0 = med_L * (1 - self.ref_mask.numpy()) + res_L * self.ref_mask.numpy()
+                    X0 = med_R * self.ref_mask.numpy() + res_R * (1 - self.ref_mask.numpy())
+
+                else :
+                    science_data_derot_np = cube_derotate(self.science_data[:-self.nb_ref], self.model.rot_angles[:-self.nb_ref])
+                    science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double()
+                    med_L = np.median(self.science_data[:-self.nb_ref], axis=0).clip(min=0)
+                    R_fr = cube_derotate(self.science_data[:-self.nb_ref] - np.tile(med_L, (self.nb_frame-self.nb_ref, 1, 1)),
+                                        self.model.rot_angles[:-self.nb_ref])
+                    res_R = np.mean(R_fr, axis=0).clip(min=0)
+                    del R_fr
+                    # self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
+
+                    med_R = np.median(science_data_derot_np, axis=0).clip(min=0)
+                    L_fr = self.science_data[:-self.nb_ref] - cube_derotate(np.tile(med_R, (self.nb_frame -self.nb_ref , 1, 1)), 
+                                                                            self.model.rot_angles[:-self.nb_ref])
+                    res_L = np.mean(L_fr, axis=0).clip(min=0)
+                    del L_fr
+                    # self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), res.clip(min=0)
+
+                    L0 = res_L
+                    X0 = res_R
+                    
+                self.L0x0 = L0, X0
+
+            if isinstance(self.model, model_ASDI):
+                science_data_derot_np = np.ndarray(self.science_data.shape)
+                for channel in range(self.model.nb_sframe):
+                    science_data_derot_np[:, channel] = cube_derotate(self.science_data[:, channel],
+                                                                      self.model.rot_angles)
+                for angles in range(self.model.nb_rframe):
+                    tmp_derot, res, _, _, _, _ = cube_rescaling_wavelengths(science_data_derot_np[angles, :],
+                                                                            self.model.scales, full_output=True)
+                    if science_data_derot_np.shape[-1] > self.shape[0]:
+                        science_data_derot_np[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
+                    else:
+                        science_data_derot_np[angles, :] = tmp_derot
+
+                if self.L0x0 is not None: pass
+                elif init_maxL:
+                    res = np.mean(self.science_data, axis=(0, 1))
+                    L_fr = np.zeros(science_data_derot_np.shape)
+                    res_cube = np.tile(res, (self.model.nb_rframe, self.model.nb_sframe, 1, 1))
+                    for channel in range(self.model.nb_sframe):
+                        L_fr[:, channel] = cube_derotate(res_cube[:, channel], -self.model.rot_angles)
+                    for angles in range(self.model.nb_rframe):
+                        tmp_derot, _, _, _, _, _ = cube_rescaling_wavelengths(res_cube[angles, :],
+                                                                              self.model.scales, full_output=True)
+                        if L_fr.shape[-1] > self.shape[0]: L_fr[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
+                    L_lr = self.science_data - L_fr
+                    self.L0x0 = np.mean(L_lr, axis=(0, 1)), res.clip(min=0)
+                else:
+                    res = np.mean(science_data_derot_np, axis=(0, 1))
+                    R_fr = np.zeros(science_data_derot_np.shape)
+                    res_cube = np.tile(res, (self.model.nb_rframe, self.model.nb_sframe, 1, 1))
+                    for channel in range(self.model.nb_sframe):
+                        R_fr[:, channel] = cube_derotate(res_cube[:, channel],
+                                                         - self.model.rot_angles)
+                    for angles in range(self.model.nb_rframe):
+                        tmp_derot, _, _, _, _, _ = cube_rescaling_wavelengths(res_cube[angles, :],
+                                                                              1 / self.model.scales, full_output=True)
+                        if R_fr.shape[-1] > self.shape[0]: R_fr[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
+                    R_lr = self.science_data - R_fr
+                    self.L0x0 = np.mean(R_lr, axis=(0, 1)), res.clip(min=0)
+                science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double().to(
+                    self.device)
+
+                if isinstance(self.model, model_SDI):
+                    science_data_derot_np, res, _, _, _, _ = cube_rescaling_wavelengths(self.science_data,
+                                                                                        self.model.scales,
+                                                                                        full_output=True, )
+                    if science_data_derot_np.shape[-1] > self.shape[0]:
+                        science_data_derot_np = cube_crop_frames(science_data_derot_np, self.shape[0])
+
+                    if self.L0x0 is not None: pass
+                    elif init_maxL:
+                        res = np.mean(science_data_derot_np, axis=0)
+                        L_fr, L_mean, _, _, _, _ = cube_rescaling_wavelengths(
+                            np.tile((res), (self.model.nb_sframe, 1, 1)), 1 / self.model.scales, full_output=True)
+                        if L_fr.shape[-1] > self.shape[0]: L_fr = cube_crop_frames(L_fr, self.shape[0])
+                        write_fits("L_fr", L_fr)
+                        L_lr = (science_data_derot_np - L_fr).clip(min=0)
+                        write_fits("L_lr", L_lr)
+                        self.L0x0 = np.mean(L_lr, axis=0), res.clip(min=0)
+                    else:
+                        res = np.median(self.science_data, axis=0)
+                        R_fr, R_mean, _, _, _, _ = cube_rescaling_wavelengths(
+                            np.tile((res).clip(min=0), (self.model.nb_sframe, 1, 1)), self.model.scales,
+                            full_output=True)
+                        if R_fr.shape[-1] > self.shape[0]:  R_fr = cube_crop_frames(R_fr, self.shape[0])
+                        write_fits("R_fr", R_fr)
+                        R_lr = (science_data_derot_np - R_fr).clip(min=0)
+                        write_fits("R_lr", R_lr)
+                        self.L0x0 = np.mean(R_lr, axis=0), res.clip(min=0)
+                        
+        return self.get_initialisation(save=save)
+
+    #### ESTIMATE METHOD ####
 
     def estimate(self, w_r=0.03, w_r2=0.03, w_r3=0.01, w_pcent=True, estimI="Both", med_sub=False, weighted_rot=True,
                  w_way=(0, 1), maxiter=10, gtol=1e-10, kactiv=0, kdactiv=None, save="./", suffix='', gif=False,
-                 verbose=False, history=True, init_maxL=False, mask_L=None):
+                 verbose=False, history=True):
         """ Resole the minimization of probleme neo-mayo
             The first step with pca aim to find a good initialisation
             The second step process to the minimization
@@ -309,7 +595,7 @@ class mustard_estimator:
 
         """
         # For verbose, saving, configuration info sortage
-        estimI = estimI.capitalize()
+        estimI = estimI.capitalize() if estimI is not None else "None"
         self.name = '_' + suffix if suffix else ''
         self.savedir = (save if isinstance(save, str) else ".") + "/mustard_out" + self.name + "/"
         self.config[4] = estimI + "X and L" if estimI == "Both" else estimI
@@ -344,179 +630,34 @@ class mustard_estimator:
         elif self.ang_weight is None:
             self.ang_weight = torch.from_numpy(np.ones((self.nb_frame, 1, 1, 1))).double().to(self.device)
 
-        # When pixels by their variances. Can be shut down.
-        temporal_var = np.var(self.science_data, axis=0)
-        temporal_var *= 1 / np.max(temporal_var)
-        self.var_pond = 1  # torch.unsqueeze(torch.from_numpy(1 / temporal_var), 0).double().to(self.device)
 
         # Combine static masks/weights into one signle weight mask.
-        self.weight = self.coro * self.var_pond * self.ang_weight
+        self.weight = self.coro * self.ang_weight
 
-        # ______________________________________
-        # Define constantes and convert arry to tensor
+        # __________________________________
+        # Initialisation with max common
+        
+        L0, X0 = self.get_initialisation(save=False)
 
-        # Med sub
-        if mask_L is not None:
-            if len(mask_L) == 2 and isinstance(mask_L[0], int) and isinstance(mask_L[1], int):
-                self.ref_mask = torch.Tensor(circle(self.shape, mask_L[1]) - circle(self.shape, mask_L[0]))
-                self.ref_mask_siz = mask_L
-            else:
-                raise "mask_L should be an object that contain two int"
+        L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double().to(self.device)
+        X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double().to(self.device)
+        flux_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
 
+        fluxR_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
+        if self.nb_ref : fluxR_0[:-self.nb_ref] = 0
+        
+        science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
+        science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(self.device)
         if isinstance(self.model, model_ASDI):
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 2).double().to(self.device)
         else:
             science_data = torch.unsqueeze(torch.from_numpy(self.science_data), 1).double().to(self.device)
 
-        # __________________________________
-        # Initialisation with max common
-
-        if self.L0x0 is not None and w_way[1] == 0:
-            science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-            science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(self.device)
-            if verbose: print("Load initialization")
-            L0, X0 = self.L0x0[0], self.L0x0[1]
-        else:
-            # TODO : sceince_data_derot means derotated (if ADI) or descale (if SDI) or both (if ASDI) consider refactor
-            if isinstance(self.model, model_ADI):
-
-                if verbose: print("Mode ADI : Max common init in progress... ")
-
-                if self.nb_ref == 0 :
-                    science_data_derot_np = cube_derotate(self.science_data, self.model.rot_angles)
-                    science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double()
-
-                    med_L = np.median(self.science_data, axis=0).clip(min=0)
-                    R_fr = science_data_derot_np - cube_derotate(np.tile(med_L, (self.nb_frame, 1, 1)),
-                                                                 -self.model.rot_angles)
-                    res_R = np.mean(R_fr, axis=0).clip(min=0)
-                    del R_fr
-                    # self.L0x0 = res.clip(min=0), np.mean(R_fr, axis=0).clip(min=0)
-
-                    med_R = np.median(science_data_derot_np, axis=0).clip(min=0)
-                    L_fr = self.science_data - cube_derotate(np.tile(med_R, (self.nb_frame, 1, 1)), self.model.rot_angles)
-                    res_L = np.mean(L_fr, axis=0).clip(min=0)
-                    del L_fr
-                    # self.L0x0 = np.mean(L_fr, axis=0).clip(min=0), res.clip(min=0)
-
-                    if init_maxL:
-                        L0 = med_L.clip(min=0)*(1 - self.ref_mask.numpy()) + res_L*self.ref_mask.numpy()
-                        X0 = med_R*self.ref_mask.numpy() #+ res_R.clip(min=0)*(1 - self.ref_mask.numpy())
-                    else:
-                        L0 = med_L.clip(min=0)*(1 - self.ref_mask.numpy()) #+ res_L*self.ref_mask.numpy()
-                        X0 = res_R.clip(min=0)*(1 - self.ref_mask.numpy()) #+ res_R*self.ref_mask.numpy()
-
-                    L0 = med_L * (1 - self.ref_mask.numpy()) + res_L * self.ref_mask.numpy()
-                    X0 = med_R * self.ref_mask.numpy() + res_R * (1 - self.ref_mask.numpy())
-
-                else :
-
-                    science_data_derot_np = cube_derotate(self.science_data[:-self.nb_ref], self.model.rot_angles)
-                    ref_mean = np.mean(self.science_data[:self.nb_ref])
-
-                    X0 = np.mean(science_data_derot_np-ref_mean) #+ res_R.clip(min=0)*(1 - self.ref_mask.numpy())
-                    empty_sd = self.science_data[:-self.nb_ref] - cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), self.model.rot_angles)
-                    L0 = med_L.clip(min=0)*(1 - self.ref_mask.numpy()) + res_L*self.ref_mask.numpy()
-
-                self.L0x0 = L0, X0
-                del res_R, res_L, med_R, med_L
-
-            if isinstance(self.model, model_ASDI):
-                if verbose: print("Mode ASDI : Max common init in progress... ")
-                science_data_derot_np = np.ndarray(self.science_data.shape)
-                for channel in range(self.model.nb_sframe):
-                    science_data_derot_np[:, channel] = cube_derotate(self.science_data[:, channel],
-                                                                      self.model.rot_angles)
-                for angles in range(self.model.nb_rframe):
-                    tmp_derot, res, _, _, _, _ = cube_rescaling_wavelengths(science_data_derot_np[angles, :],
-                                                                            self.model.scales, full_output=True)
-                    if science_data_derot_np.shape[-1] > self.shape[0]:
-                        science_data_derot_np[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
-                    else:
-                        science_data_derot_np[angles, :] = tmp_derot
-
-                if self.L0x0 is not None:
-                    if verbose: print("Load initialization")
-                elif init_maxL:
-                    res = np.mean(self.science_data, axis=(0, 1))
-                    L_fr = np.zeros(science_data_derot_np.shape)
-                    res_cube = np.tile(res, (self.model.nb_rframe, self.model.nb_sframe, 1, 1))
-                    for channel in range(self.model.nb_sframe):
-                        L_fr[:, channel] = cube_derotate(res_cube[:, channel], -self.model.rot_angles)
-                    for angles in range(self.model.nb_rframe):
-                        tmp_derot, _, _, _, _, _ = cube_rescaling_wavelengths(res_cube[angles, :],
-                                                                              self.model.scales, full_output=True)
-                        if L_fr.shape[-1] > self.shape[0]: L_fr[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
-                    L_lr = self.science_data - L_fr
-                    self.L0x0 = np.mean(L_lr, axis=(0, 1)), res.clip(min=0)
-                else:
-                    res = np.mean(science_data_derot_np, axis=(0, 1))
-                    R_fr = np.zeros(science_data_derot_np.shape)
-                    res_cube = np.tile(res, (self.model.nb_rframe, self.model.nb_sframe, 1, 1))
-                    for channel in range(self.model.nb_sframe):
-                        R_fr[:, channel] = cube_derotate(res_cube[:, channel],
-                                                         - self.model.rot_angles)
-                    for angles in range(self.model.nb_rframe):
-                        tmp_derot, _, _, _, _, _ = cube_rescaling_wavelengths(res_cube[angles, :],
-                                                                              1 / self.model.scales, full_output=True)
-                        if R_fr.shape[-1] > self.shape[0]: R_fr[angles, :] = cube_crop_frames(tmp_derot, self.shape[0])
-                    R_lr = self.science_data - R_fr
-                    self.L0x0 = np.mean(R_lr, axis=(0, 1)), res.clip(min=0)
-                science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 2).double().to(
-                    self.device)
-
-                if isinstance(self.model, model_SDI):
-                    if verbose: print("Mode SDI : Max common init in progress... ")
-                    science_data_derot_np, res, _, _, _, _ = cube_rescaling_wavelengths(self.science_data,
-                                                                                        self.model.scales,
-                                                                                        full_output=True, )
-                    if science_data_derot_np.shape[-1] > self.shape[0]:
-                        science_data_derot_np = cube_crop_frames(science_data_derot_np, self.shape[0])
-
-                    if self.L0x0 is not None:
-                        if verbose: print("Load initialization")
-                    elif init_maxL:
-                        res = np.mean(science_data_derot_np, axis=0)
-                        L_fr, L_mean, _, _, _, _ = cube_rescaling_wavelengths(
-                            np.tile((res), (self.model.nb_sframe, 1, 1)), 1 / self.model.scales, full_output=True)
-                        if L_fr.shape[-1] > self.shape[0]: L_fr = cube_crop_frames(L_fr, self.shape[0])
-                        write_fits("L_fr", L_fr)
-                        L_lr = (science_data_derot_np - L_fr).clip(min=0)
-                        write_fits("L_lr", L_lr)
-                        self.L0x0 = np.mean(L_lr, axis=0), res.clip(min=0)
-                    else:
-                        res = np.median(self.science_data, axis=0)
-                        R_fr, R_mean, _, _, _, _ = cube_rescaling_wavelengths(
-                            np.tile((res).clip(min=0), (self.model.nb_sframe, 1, 1)), self.model.scales,
-                            full_output=True)
-                        if R_fr.shape[-1] > self.shape[0]:  R_fr = cube_crop_frames(R_fr, self.shape[0])
-                        write_fits("R_fr", R_fr)
-                        R_lr = (science_data_derot_np - R_fr).clip(min=0)
-                        write_fits("R_lr", R_lr)
-                        self.L0x0 = np.mean(R_lr, axis=0), res.clip(min=0)
-                    science_data_derot = torch.unsqueeze(torch.from_numpy(science_data_derot_np), 1).double().to(
-                        self.device)
-
-        self.get_initialisation(save=True)
-        if self.config[0] == "peak_preservation": self.xmax = np.max(X0)
-
-        # __________________________________
-        # Initialisation with max common
-
-        L0 = torch.unsqueeze(torch.from_numpy(L0), 0).double().to(self.device)
-        X0 = torch.unsqueeze(torch.from_numpy(X0), 0).double().to(self.device)
-        flux_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
-        fluxR_0 = torch.ones(self.model.nb_frame - 1).double().to(self.device)
-        ref_amp_0 = torch.Tensor([1])
-
-        fluxR_0[self.nb_ref:] = 0
-
         # ______________________________________
         #  Init variables and optimizer
 
         Lk, Xk = L0.clone(), X0.clone()
-        flux_k, fluxR_k, ref_amp_k, k = flux_0.clone(), fluxR_0.clone(), ref_amp_0.clone(), 0
-        Lk.requires_grad = True
+        flux_k, fluxR_k, k = flux_0.clone(), fluxR_0.clone(), 0
         Xk.requires_grad = True
 
         # Loss and regularization at initialization 
@@ -532,7 +673,7 @@ class mustard_estimator:
                 reg1 = self.regul1(X0, L0)
                 w_r = w_rp[0] * loss0 / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                reg2 = self.regul2(X0, L0, self.mask, ref_amp_k)
+                reg2 = self.regul2(X0, L0, self.mask)
                 w_r2 = w_rp[1] * loss0 / reg2 if w_rp[1] and reg2 > 0 else 0
                 
                 reg3 = self.regul3(X0, L0)
@@ -544,7 +685,7 @@ class mustard_estimator:
                     kactiv = 2
 
             R1_0 =  w_r * self.regul1(X0, L0) if w_r * Ractiv else 0
-            R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask, ref_amp_0)
+            R2_0 = Ractiv * w_r2 * self.regul2(X0, L0, self.mask)
             R3_0 = w_r3 * self.regul3(X0, L0) if w_r * Ractiv else 0
 
             loss0 += (R1_0 + R2_0 + R3_0)
@@ -553,7 +694,7 @@ class mustard_estimator:
         loss, R1, R2, R3 = loss0, R1_0, R2_0, R3_0
 
         # Starting minization soon ...
-        stat_msg = init_msg.format(self.name, save, *self.config, w_r, w_r2, str(maxiter))
+        stat_msg = init_msg.format(self.name, save, *self.config, w_rp[0], w_rp[1], str(maxiter))
         if verbose: print(stat_msg)
         txt_msg = stat_msg
 
@@ -562,7 +703,7 @@ class mustard_estimator:
 
         # Definition of minimizer step.
         def closure():
-            nonlocal R1, R2, R3, loss, w_r, w_r2, w_r3, Lk, Xk, flux_k, fluxR_k, ref_amp_k
+            nonlocal R1, R2, R3, loss, w_r, w_r2, w_r3, Lk, Xk, flux_k, fluxR_k
             optimizer.zero_grad()  # Reset gradients
 
             # Background flux managment (beta)
@@ -576,7 +717,7 @@ class mustard_estimator:
 
             # Compute regularization(s)
             R1 = Ractiv * w_r  * self.regul1(Xk, Lk) if Ractiv * w_r else 0
-            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask, ref_amp_k) if Ractiv * w_r2 else 0
+            R2 = Ractiv * w_r2 * self.regul2(Xk, Lk, self.mask) if Ractiv * w_r2 else 0
             R3 = Ractiv * w_r3 * self.regul3(Xk, Lk) if Ractiv * w_r3 else 0
 
             # Compute loss and local gradients
@@ -589,7 +730,7 @@ class mustard_estimator:
 
         # Definition of regularization activation
         def activation():
-            nonlocal w_r, w_r2, w_r3, optimizer, Xk, Lk, flux_k, fluxR_k, ref_amp_k
+            nonlocal w_r, w_r2, w_r3, optimizer, Xk, Lk, flux_k, fluxR_k
             for activ_step in ["ACTIVATED", "AJUSTED"]:  # Activation in two step
 
                 # Second step : re-compute regul after performing a optimizer step
@@ -600,7 +741,7 @@ class mustard_estimator:
                         reg1 = self.regul1(Xk, Lk)
                         w_r = w_rp[0] * loss / reg1 if w_rp[0] and reg1 > 0 else 0
 
-                        reg2 = self.regul2(Xk, Lk, self.mask, ref_amp_k)
+                        reg2 = self.regul2(Xk, Lk, self.mask)
                         w_r2 = w_rp[1] * loss / reg2 if w_rp[1] and reg2 > 0 else 0
                         
                         reg3 = self.regul3(Xk, Lk)
@@ -620,9 +761,6 @@ class mustard_estimator:
                 elif estimI == "L":
                     optimizer = optim.LBFGS([Lk, Xk, fluxR_k])
                     fluxR_k.requires_grad = True
-                elif estimI == "ref":
-                    optimizer = optim.LBFGS([Lk, Xk, ref_amp_k])
-                    ref_amp_k.requires_grad = True
                 else:
                     optimizer = optim.LBFGS([Lk, Xk])
 
@@ -651,9 +789,6 @@ class mustard_estimator:
         elif estimI == "L":
             optimizer = optim.LBFGS([Lk, Xk, fluxR_k])
             fluxR_k.requires_grad = True
-        elif estimI == "ref":
-            optimizer = optim.LBFGS([Lk, Xk, ref_amp_k])
-            ref_amp_k.requires_grad = True
         else:
             optimizer = optim.LBFGS([Lk, Xk])
 
@@ -693,7 +828,7 @@ class mustard_estimator:
                 if k == 1: self.first_iter = (Lk, Xk, flux_k, fluxR_k) if estimI else (Lk, Xk)
 
                 # Break point (based on gtol)
-                grad = abs(loss[-1] - loss_evo[-2])
+                grad = abs(loss_evo[-1] - loss_evo[-2])
                 
                 if k > mink and  (grad < gtol) :
                     if not Ractiv and kactiv:  # If regul haven't been activated yet, continue with regul
@@ -730,7 +865,6 @@ class mustard_estimator:
 
         flux = abs(flux_k.detach().numpy())
         fluxR = abs(fluxR_k.detach().numpy())
-        amp_ref = abs(ref_amp_k.detach().numpy())
         loss_evo = [float(lossk.detach().numpy()) for lossk in loss_evo]
 
         # Remove bkg flux from bkg_pup. (beta)
@@ -744,7 +878,6 @@ class mustard_estimator:
                'x': (nice_L_est, nice_X_est),
                'x_no_r': (L_est, X_est),
                'flux': flux,
-               'amp_ref': amp_ref,
                'fluxR': fluxR,
                'loss_evo': loss_evo,
                'Kactiv': kactiv,
@@ -765,16 +898,17 @@ class mustard_estimator:
             with open(self.savedir + "/config.txt", 'w') as f:
                 f.write(txt_msg)
 
-            if estimI:
+            if estimI!="None":
                 write_fits(self.savedir + "/flux" + self.name, flux)
                 write_fits(self.savedir + "/fluxR" + self.name, fluxR)
 
-        if estimI:
+        if estimI!="None":
             return nice_L_est, nice_X_est, flux
         else:
             return nice_L_est, nice_X_est
+    
 
-    #### SETTERS / CONFIG ####
+    #### SETTERS  ####
     
     def set_savedir(self, savedir: str):
         self.savedir = savedir
@@ -802,167 +936,7 @@ class mustard_estimator:
                          cube_derotate(np.tile(X0, (self.nb_frame, 1, 1)), -self.model.rot_angles), 0)
 
         self.L0x0 = (L0.clip(0), X0.clip(0))
-
-    def configR1(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
-        """ Configuration of first regularization. (smooth-like)"""
-
-        if mode == "smooth_with_edges":
-            self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
-                                    torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
-        elif mode == "smooth":
-            self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
-                                    torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
-
-        elif mode == "l1":
-            self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
-
-        self.p_L = p_L
-        self.p_X = p_X
-
-        if smoothL:
-            self.regul1 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
-        else:
-            self.regul1 = lambda X, L: self.smooth(X)
-
-
-    def configR2(self, Msk=None, mode="mask", penaliz="X", invert=False, save=False):
-        """ Configuration for Second regularization.
-        Two possible mode :   R = M*X      (mode 'mask')
-                           or R = dist(M-X) (mode 'dist')
-                           or R = sum(X)   (mode 'l1')
-
-        Parameters
-        ----------
-        save : False
-            Save your mask
-
-        Msk : numpy.array or torch.tensor
-            Prior mask of X.
-
-        mode : {"mask","dist"}.
-            if "mask" :  R = norm(M*X)
-                if M will be normalize to have values from 0 to 1.
-            if "dist" :  R = dist(M-X)
-
-        penaliz : {"X","L","both"}
-            Unknown to penaliz.
-            With mode mask :
-                if "X" : R = norm(M*X)
-                if "L" : R = norm((1-M)*L)
-                if "B" : R = norm(M*X) + norm((1-M)*L)
-            With mode dist :
-                if "X" : R = dist(M-X)
-                if "L" : R = dist(M-L)
-                if "B" : R = dist(M-X) - dist(M-L)
-            With mode l1 :
-                if "X" : R = sum(X)
-                if "L" : R = sum(L)
-                if "B" : R = sum(X) - sum(L)
-
-        invert : Bool
-            Reverse penalize mode bewteen L and X.
-
-        Returns
-        -------
-
-        """
-        if mode == "pdi":
-            Msk = convert_to_mask(Msk)
-            mode = "mask"
-
-        if mode != 'l1':
-            if isinstance(Msk, np.ndarray): Msk = torch.from_numpy(Msk)
-            if not (isinstance(Msk, torch.Tensor) and Msk.shape == self.model.frame_shape):
-                raise TypeError("Mask M should be tensor or arr y of size " + str(self.model.frame_shape))
-
-        if Msk is not None and (mode != 'mask' and mode != 'ref'):
-            warnings.warn(UserWarning("You provided a mask but did not chose 'mask' option"))
-
-        self.F_rp = create_radial_prof_matirx(self.model.frame_shape)  # Radial profil transform
-        # y, x = np.indices(self.model.frame_shape)
-        # self.yx = torch.from_numpy(y), torch.from_numpy(x)
-
-        penaliz = penaliz.capitalize()
-        rM = self.coroR  # corono mask for regul
-        if penaliz not in ("X", "L", "Both", "B"):
-            raise Exception("Unknown value of penaliz. Possible values are {'X','L','B'}")
-
-        if mode == "dist":
-            self.mask = Msk
-            sign = -1 if invert else 1
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M: tsum(rM * (M - X) ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M: tsum(rM * (M - L) ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M: sign * (tsum(rM * (M - X) ** 2) -
-                                                      tsum(rM * (M - L) ** 2))
-
-        elif mode == "mask":
-            Msk = Msk / torch.max(Msk)  # Normalize mask
-            self.mask = (1 - Msk) if invert else Msk
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M, amp: tsum(rM * ((1 - M) * L) ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M, amp: tsum(rM * (M * X) ** 2) + \
-                                                   tsum(rM * M) ** 2 / tsum(rM * (1 - M)) ** 2 * \
-                                                   tsum(rM * ((1 - M) * L) ** 2) + \
-                                                   res_non_convexe(radial_profil(L, self.F_rp))
-
-        elif mode == "l1":
-            sign = -1 if invert else 1
-            if penaliz == "X":
-                self.regul2 = lambda X, L, M: tsum(X ** 2)
-            elif penaliz == "L":
-                self.regul2 = lambda X, L, M: tsum(L ** 2)
-            elif penaliz in ("Both", "B"):
-                self.regul2 = lambda X, L, M: sign * (tsum(X ** 2) - tsum(L ** 2))
-
-        elif mode == "ref":
-            self.mask = np.mean(cube_derotate(np.tile(Msk, (self.nb_frame, 1, 1)), self.model.rot_angles), axis=0)
-            self.mask = radial_profil(self.coro * torch.Tensor(self.mask), self.F_rp)
-            self.r2 = torch.linspace(0, len(self.mask), len(self.mask)) ** 2
-            self.regul2 = lambda X, L, M, amp: tsum((amp * M - radial_profil(self.coro * torch.mean(
-                self.model.get_Lf(L, rot=True), dim=0)[0], self.F_rp)) ** 2)
-
-        else:
-            raise Exception("Unknown value of mode. Possible values are {'mask','dist','l1'}")
-
-        R2_name = mode + " on " + penaliz
-        R2_name += " inverted" if invert else ""
-        self.config[1] = R2_name
-
-        if save and mode != "l1":
-            if not isdir(self.savedir): makedirs(self.savedir)
-            write_fits(self.savedir + "/maskR2" + self.name, self.mask.numpy())
-
-    def configR3(self, mode: str, smoothL=True, p_L=1, p_X=1, epsi=1e-7):
-            """ Configuration of first regularization. (smooth-like)"""
-    
-            if mode == "smooth_with_edges":
-                self.smooth = lambda X: torch.sum(self.coroR * sobel_tensor_conv(X, axis='y') ** 2 - epsi ** 2) + \
-                                        torch.sum(self.coroR * sobel_tensor_conv(X, axis='x') ** 2 - epsi ** 2)
-            elif mode == "smooth":
-                self.smooth = lambda X: torch.sum(sobel_tensor_conv(X, axis='y') ** 2) + \
-                                        torch.sum(sobel_tensor_conv(X, axis='x') ** 2)
-    
-            elif mode == "l1":
-                self.smooth = lambda X: torch.sum(self.coroR * torch.abs(X))
-    
-            else:
-                self.smooth = lambda X: 0
-    
-            self.p_L = p_L
-            self.p_X = p_X
-    
-            if smoothL:
-                self.regul3 = lambda X, L: self.p_X * self.smooth(X) + self.p_L * self.smooth(L)
-            else:
-                self.regul3 = lambda X, L: self.smooth(X)
-
-    
+        
     #### GETTERS / PLOTS ####
 
     def get_science_data(self):

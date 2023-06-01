@@ -51,7 +51,7 @@ class Cube_model():
             self.psf = None
 
         # Coro mask
-        self.coro = torch.unsqueeze(torch.from_numpy(coro), 0)
+        self.coro = torch.unsqueeze(coro, 0)
 
     def init_input_estimate(self, Y):
         # If I was a good programmer I would have writen the assertions to prevent bugs here..
